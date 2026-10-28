@@ -1,0 +1,36 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Data dan secret lokal
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
+data/*.log
+data/admin_token
+data/secret.key
+data/*.key
+data/backups/
+
+# Editor dan OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
