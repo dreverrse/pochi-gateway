@@ -3,6 +3,7 @@ import codecs
 import json
 import logging
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -41,7 +42,7 @@ class GatewayError(Exception):
 
 @dataclass(frozen=True)
 class AuthenticatedKey:
-    id: int
+    id: int | None
     name: str
     allowed_models: tuple[str, ...]
     budget_limit_usd: float | None
@@ -273,6 +274,11 @@ class SSEUsageParser:
         self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self._buffer = ""
         self.usage: tuple[int, int] | None = None
+        self._parts: list[str] = []
+
+    @property
+    def content(self) -> str:
+        return "".join(self._parts)
 
     def feed(self, chunk: bytes) -> None:
         self._buffer += self._decoder.decode(chunk)
@@ -304,6 +310,13 @@ class SSEUsageParser:
         usage = extract_usage(payload)
         if usage is not None:
             self.usage = usage
+        choices = payload.get("choices") if isinstance(payload, dict) else None
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            delta = choices[0].get("delta")
+            if isinstance(delta, dict):
+                piece = delta.get("content")
+                if isinstance(piece, str) and piece:
+                    self._parts.append(piece)
 
 
 def _upstream_error_code(content: bytes, status_code: int) -> str:
@@ -374,6 +387,38 @@ async def _close_response(response: httpx.Response | None, client: httpx.AsyncCl
         pass
 
 
+class ClientGoneError(Exception):
+    """Klien menutup koneksi (atau menekan Stop) sebelum provider menjawab."""
+
+
+async def _send_with_abort(client, request, stream: bool, disconnect_check):
+    """Tunggu provider, tapi jangan sampai Stop/close tab menggantung di sini.
+
+    `httpx.AsyncClient.send` tidak bisa dibatalkan dari luar, jadi tugasnya
+    di-race dengan polling disconnect tiap 100 ms.
+    """
+    send_task = asyncio.ensure_future(client.send(request, stream=stream))
+    try:
+        if disconnect_check is None:
+            return await send_task
+        while True:
+            done, _ = await asyncio.wait({send_task}, timeout=0.1)
+            if done:
+                return send_task.result()
+            try:
+                gone = await disconnect_check()
+            except Exception:
+                gone = False
+            if gone:
+                send_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await send_task
+                raise ClientGoneError("client disconnected")
+    finally:
+        if not send_task.done():
+            send_task.cancel()
+
+
 def _timeout() -> httpx.Timeout:
     return httpx.Timeout(
         settings.gateway_timeout_seconds,
@@ -386,6 +431,8 @@ async def proxy_chat(
     route: ModelRoute,
     payload: ChatCompletionRequest,
     request_id: str,
+    on_complete: Any = None,
+    disconnect_check: Any = None,
 ) -> Response:
     adapter = get_adapter(route.adapter_type)
     body = payload.model_dump(exclude_unset=True, exclude_none=True)
@@ -411,7 +458,27 @@ async def proxy_chat(
 
     try:
         request = client.build_request("POST", url, json=body, headers=headers)
-        response = await client.send(request, stream=payload.stream)
+        response = await _send_with_abort(
+            client, request, payload.stream, disconnect_check
+        )
+    except ClientGoneError:
+        await _close_response(None, client)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        _safe_log(
+            request_id,
+            virtual_key,
+            route,
+            0,
+            0,
+            0.0,
+            "known",
+            499,
+            duration_ms,
+            payload.stream,
+            "client_disconnected",
+            created_at,
+        )
+        raise
     except httpx.TimeoutException:
         await _close_response(None, client)
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -544,6 +611,19 @@ async def proxy_chat(
                 async for chunk in response.aiter_bytes():
                     parser.feed(chunk)
                     yield chunk
+                    # Klien menutup tab / menekan Stop: uvicorn baru memberi tahu
+                    # lewat receive, bukan dengan membatalkan task. Tanpa cek ini
+                    # stream tetap jalan sampai provider selesai dan pesan
+                    # "stopped" baru tercatat belakangan.
+                    if disconnect_check is not None:
+                        try:
+                            gone = await disconnect_check()
+                        except Exception:
+                            gone = False
+                        if gone:
+                            cancelled = True
+                            error_code = "client_disconnected"
+                            break
             except asyncio.CancelledError:
                 cancelled = True
                 error_code = "client_disconnected"
@@ -595,6 +675,21 @@ async def proxy_chat(
                     created_at,
                 )
 
+                if on_complete is not None:
+                    try:
+                        on_complete(
+                            {
+                                "usage": parser.usage,
+                                "content": parser.content,
+                                "duration_ms": duration_ms,
+                                "status": 499 if cancelled else log_status,
+                                "error_code": error_code,
+                                "cancelled": cancelled,
+                            }
+                        )
+                    except Exception:  # pragma: no cover - callback tidak boleh memutus stream
+                        logger.exception("proxy_chat on_complete gagal")
+
         return StreamingResponse(
             stream_body(),
             status_code=response.status_code,
@@ -638,6 +733,31 @@ async def proxy_chat(
         None,
         created_at,
     )
+
+    if on_complete is not None:
+        text = ""
+        try:
+            payload_json = json.loads(content.decode("utf-8"))
+            choices = payload_json.get("choices") if isinstance(payload_json, dict) else None
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    text = message["content"]
+        except (UnicodeDecodeError, ValueError):
+            text = ""
+        try:
+            on_complete(
+                {
+                    "usage": usage,
+                    "content": text,
+                    "duration_ms": duration_ms,
+                    "status": response.status_code,
+                    "error_code": None,
+                    "cancelled": False,
+                }
+            )
+        except Exception:  # pragma: no cover
+            logger.exception("proxy_chat on_complete gagal")
 
     return Response(
         content=content,

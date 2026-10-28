@@ -2,9 +2,9 @@ import sqlite3
 
 from app.core.config import settings
 from app.db.database import get_connection
+from app.db.time_window import Window
 
-LOG_SELECT = """
-SELECT
+LOG_COLUMNS = """
     l.id,
     l.request_id,
     k.name AS key_name,
@@ -20,20 +20,27 @@ SELECT
     l.streamed,
     l.error_code,
     l.created_at
+"""
+
+LOG_FROM = """
 FROM request_logs l
 LEFT JOIN virtual_keys k ON k.id = l.virtual_key_id
 LEFT JOIN providers p ON p.id = l.provider_id
 """
 
+LOG_SELECT = f"SELECT {LOG_COLUMNS} {LOG_FROM}"
+
 
 def _filters(
-    days: int,
+    window: Window,
     status: str,
     model: str | None,
     key_id: int | None,
+    provider_id: int | None = None,
+    search: str | None = None,
 ) -> tuple[str, list[object]]:
-    clauses = ["date(l.created_at) >= date('now', ?)"]
-    values: list[object] = [f"-{days - 1} days"]
+    clause, values = window.clause("l.created_at")
+    clauses = [clause]
 
     if status == "success":
         clauses.append("l.status_code BETWEEN 200 AND 299")
@@ -48,23 +55,37 @@ def _filters(
         clauses.append("l.virtual_key_id = ?")
         values.append(key_id)
 
+    if provider_id is not None:
+        clauses.append("l.provider_id = ?")
+        values.append(provider_id)
+
+    if search:
+        pattern = f"%{search.strip()}%"
+        clauses.append(
+            "(l.request_id LIKE ? OR l.public_model LIKE ? OR l.provider_model LIKE ?"
+            " OR p.name LIKE ? OR k.name LIKE ?)"
+        )
+        values.extend([pattern] * 5)
+
     return " AND ".join(clauses), values
 
 
 def list_request_logs(
-    days: int,
+    window: Window,
     status: str,
     model: str | None,
     key_id: int | None,
     page: int,
     page_size: int,
+    provider_id: int | None = None,
+    search: str | None = None,
 ) -> tuple[list[sqlite3.Row], int]:
-    where_sql, values = _filters(days, status, model, key_id)
+    where_sql, values = _filters(window, status, model, key_id, provider_id, search)
     offset = (page - 1) * page_size
 
     with get_connection(settings.db_path) as connection:
         total = connection.execute(
-            f"SELECT COUNT(*) FROM request_logs l WHERE {where_sql}",
+            f"SELECT COUNT(*) {LOG_FROM} WHERE {where_sql}",
             values,
         ).fetchone()[0]
         rows = connection.execute(
@@ -81,12 +102,14 @@ def list_request_logs(
 
 
 def list_request_logs_all(
-    days: int,
+    window: Window,
     status: str,
     model: str | None,
     key_id: int | None,
+    provider_id: int | None = None,
+    search: str | None = None,
 ) -> list[sqlite3.Row]:
-    where_sql, values = _filters(days, status, model, key_id)
+    where_sql, values = _filters(window, status, model, key_id, provider_id, search)
     with get_connection(settings.db_path) as connection:
         rows = connection.execute(
             f"""

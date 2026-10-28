@@ -1,9 +1,9 @@
 import sqlite3
-from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.db.database import get_connection
-from app.models.entities import Summary, TimeseriesPoint, UsageBreakdown
+from app.db.time_window import Window
+from app.models.entities import Summary, SummaryTotals, TimeseriesPoint, UsageBreakdown
 
 BREAKDOWN_SQL = """
 SELECT
@@ -14,7 +14,7 @@ SELECT
     COALESCE(SUM(CASE WHEN cost_status IN ('known', 'estimated') THEN cost_usd END), 0) AS cost_usd
 FROM request_logs
 {join}
-WHERE date(request_logs.created_at) >= date('now', ?)
+WHERE {where}
 GROUP BY {label}
 ORDER BY requests DESC
 """
@@ -37,32 +37,66 @@ def _to_breakdown(rows: list[sqlite3.Row]) -> list[UsageBreakdown]:
     ]
 
 
-def _timeseries(connection: sqlite3.Connection, days: int) -> list[TimeseriesPoint]:
-    rows = connection.execute(
-        """
+def _totals(connection: sqlite3.Connection, where_sql: str, values: list[object]) -> SummaryTotals:
+    row = connection.execute(
+        f"""
         SELECT
-            date(created_at) AS date,
+            COUNT(*) AS total_requests,
+            COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS successful_requests,
+            COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_requests,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(CASE WHEN cost_status = 'known' THEN cost_usd END), 0) AS known_cost_usd,
+            COALESCE(SUM(CASE WHEN cost_status = 'estimated' THEN cost_usd END), 0) AS estimated_cost_usd,
+            COALESCE(SUM(CASE WHEN cost_status = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_cost_requests,
+            COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
+        FROM request_logs
+        WHERE {where_sql}
+        """,
+        values,
+    ).fetchone()
+
+    return SummaryTotals(
+        total_requests=row["total_requests"],
+        successful_requests=row["successful_requests"],
+        failed_requests=row["failed_requests"],
+        input_tokens=row["input_tokens"],
+        output_tokens=row["output_tokens"],
+        known_cost_usd=_round(row["known_cost_usd"]),
+        estimated_cost_usd=_round(row["estimated_cost_usd"]),
+        unknown_cost_requests=row["unknown_cost_requests"],
+        avg_duration_ms=_round(row["avg_duration_ms"], 1),
+    )
+
+
+def _timeseries(connection: sqlite3.Connection, window: Window) -> list[TimeseriesPoint]:
+    where_sql, values = window.clause()
+    bucket = window.bucket_expression()
+    rows = connection.execute(
+        f"""
+        SELECT
+            {bucket} AS bucket,
             COUNT(*) AS requests,
+            COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS successful_requests,
             COALESCE(SUM(input_tokens), 0) AS input_tokens,
             COALESCE(SUM(output_tokens), 0) AS output_tokens,
             COALESCE(SUM(CASE WHEN cost_status IN ('known', 'estimated') THEN cost_usd END), 0) AS cost_usd
         FROM request_logs
-        WHERE date(created_at) >= date('now', ?)
-        GROUP BY date(created_at)
+        WHERE {where_sql}
+        GROUP BY bucket
         """,
-        (f"-{days - 1} days",),
+        values,
     ).fetchall()
-    indexed = {row["date"]: row for row in rows}
-    today = datetime.now(timezone.utc).date()
+    indexed = {row["bucket"]: row for row in rows}
+
     points = []
-    for offset in range(days - 1, -1, -1):
-        day = today - timedelta(days=offset)
-        key = day.isoformat()
-        row = indexed.get(key)
+    for label in window.bucket_labels():
+        row = indexed.get(label)
         points.append(
             TimeseriesPoint(
-                date=key,
+                date=label,
                 requests=row["requests"] if row else 0,
+                successful_requests=row["successful_requests"] if row else 0,
                 input_tokens=row["input_tokens"] if row else 0,
                 output_tokens=row["output_tokens"] if row else 0,
                 cost_usd=_round(row["cost_usd"]) if row else 0.0,
@@ -71,67 +105,68 @@ def _timeseries(connection: sqlite3.Connection, days: int) -> list[TimeseriesPoi
     return points
 
 
-def get_summary(days: int = 14, db_path=None) -> Summary:
+def get_summary(
+    days: int | None = 14,
+    hours: int | None = None,
+    db_path=None,
+) -> Summary:
+    window = Window.build(days=days, hours=hours)
     path = db_path or settings.db_path
-    with get_connection(path) as connection:
-        totals = connection.execute(
-            """
-            SELECT
-                COUNT(*) AS total_requests,
-                COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS successful_requests,
-                COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_requests,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(CASE WHEN cost_status = 'known' THEN cost_usd END), 0) AS known_cost_usd,
-                COALESCE(SUM(CASE WHEN cost_status = 'estimated' THEN cost_usd END), 0) AS estimated_cost_usd,
-                COALESCE(SUM(CASE WHEN cost_status = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown_cost_requests,
-                COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
-            FROM request_logs
-            WHERE date(created_at) >= date('now', ?)
-            """,
-            (f"-{days - 1} days",),
-        ).fetchone()
+    where_sql, values = window.clause("request_logs.created_at")
 
-        window = (f"-{days - 1} days",)
+    with get_connection(path) as connection:
+        totals = _totals(connection, where_sql, values)
+
         by_model = connection.execute(
-            BREAKDOWN_SQL.format(label="public_model", join=""), window
+            BREAKDOWN_SQL.format(label="public_model", join="", where=where_sql), values
         ).fetchall()
         by_provider = connection.execute(
             BREAKDOWN_SQL.format(
                 label="COALESCE(providers.name, 'Unknown provider')",
                 join="LEFT JOIN providers ON providers.id = request_logs.provider_id",
+                where=where_sql,
             ),
-            window,
+            values,
         ).fetchall()
         by_key = connection.execute(
             BREAKDOWN_SQL.format(
                 label="COALESCE(virtual_keys.name, 'Unknown key')",
                 join="LEFT JOIN virtual_keys ON virtual_keys.id = request_logs.virtual_key_id",
+                where=where_sql,
             ),
-            window,
+            values,
         ).fetchall()
 
+        previous_where, previous_values = window.previous_clause("request_logs.created_at")
+        previous = _totals(connection, previous_where, previous_values)
+
         return Summary(
-            total_requests=totals["total_requests"],
-            successful_requests=totals["successful_requests"],
-            failed_requests=totals["failed_requests"],
-            input_tokens=totals["input_tokens"],
-            output_tokens=totals["output_tokens"],
-            known_cost_usd=_round(totals["known_cost_usd"]),
-            estimated_cost_usd=_round(totals["estimated_cost_usd"]),
-            unknown_cost_requests=totals["unknown_cost_requests"],
-            avg_duration_ms=_round(totals["avg_duration_ms"], 1),
+            total_requests=totals.total_requests,
+            successful_requests=totals.successful_requests,
+            failed_requests=totals.failed_requests,
+            input_tokens=totals.input_tokens,
+            output_tokens=totals.output_tokens,
+            known_cost_usd=totals.known_cost_usd,
+            estimated_cost_usd=totals.estimated_cost_usd,
+            unknown_cost_requests=totals.unknown_cost_requests,
+            avg_duration_ms=totals.avg_duration_ms,
             by_model=_to_breakdown(by_model),
             by_provider=_to_breakdown(by_provider),
             by_key=_to_breakdown(by_key),
-            timeseries=_timeseries(connection, days),
+            timeseries=_timeseries(connection, window),
+            previous=previous,
         )
 
 
-def get_timeseries(days: int = 14, db_path=None) -> list[TimeseriesPoint]:
+def get_timeseries(
+    days: int | None = 14,
+    hours: int | None = None,
+    db_path=None,
+) -> list[TimeseriesPoint]:
+    window = Window.build(days=days, hours=hours)
     path = db_path or settings.db_path
     with get_connection(path) as connection:
-        return _timeseries(connection, days)
+        return _timeseries(connection, window)
 
 
 def ping(db_path=None) -> bool:

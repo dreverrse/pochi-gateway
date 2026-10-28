@@ -24,6 +24,8 @@ def _to_out(row: sqlite3.Row, price: sqlite3.Row | None = None) -> ModelOut:
         provider_model=row["provider_model"],
         provider_name=row["provider_name"],
         enabled=bool(row["enabled"]),
+        supports_streaming=bool(row["supports_streaming"]),
+        is_default=bool(row["is_default"]),
         input_usd_per_million=price["input_usd_per_million"] if price else None,
         output_usd_per_million=price["output_usd_per_million"] if price else None,
         price_updated_at=price["updated_at"] if price else None,
@@ -61,6 +63,8 @@ def create_model(payload: ModelCreate) -> ModelOut:
             enabled=payload.enabled,
             input_usd_per_million=payload.input_usd_per_million,
             output_usd_per_million=payload.output_usd_per_million,
+            supports_streaming=payload.supports_streaming,
+            is_default=payload.is_default,
         )
     except sqlite3.IntegrityError as exc:
         conflict = _conflict(exc, payload.public_name)
@@ -85,6 +89,10 @@ def update_model(model_id: int, payload: ModelUpdate) -> ModelOut:
         fields["provider_model"] = payload.provider_model
     if "enabled" in payload.model_fields_set and payload.enabled is not None:
         fields["enabled"] = int(payload.enabled)
+    if "supports_streaming" in payload.model_fields_set and payload.supports_streaming is not None:
+        fields["supports_streaming"] = int(payload.supports_streaming)
+    if "is_default" in payload.model_fields_set and payload.is_default is not None:
+        fields["is_default"] = int(payload.is_default)
 
     try:
         row = model_repository.update_model(

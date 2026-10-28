@@ -1,43 +1,55 @@
-import { Fragment, useEffect, useState } from "react";
-import {
-  CheckCircle2,
-  Pencil,
-  PlugZap,
-  Plus,
-  RefreshCw,
-  Server,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, Plus, RefreshCw, Server, Sparkles } from "lucide-react";
 
 import { api } from "../api/client.js";
+import { useUi } from "../app-context.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import ErrorState from "../components/ErrorState.jsx";
+import PageHeader from "../components/PageHeader.jsx";
+import ProviderCard from "../components/ProviderCard.jsx";
 import ProviderModal from "../components/ProviderModal.jsx";
+import { CardSkeletons } from "../components/Skeleton.jsx";
+import { rangeParams } from "../utils/range.js";
 
-const ADAPTER_LABELS = {
-  openai_compatible: "OpenAI compatible",
-  inception: "Inception Labs",
-};
-
-export default function Providers() {
+export default function Providers({ openAddSignal = 0 }) {
+  const { range, pushToast } = useUi();
   const [providers, setProviders] = useState([]);
+  const [stats, setStats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [actionError, setActionError] = useState("");
   const [modal, setModal] = useState(null);
   const [testState, setTestState] = useState({});
   const [togglingId, setTogglingId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [templates, setTemplates] = useState([]);
+  const [showPresets, setShowPresets] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .providerTemplates()
+      .then((rows) => {
+        if (active) setTemplates(rows);
+      })
+      .catch(() => {
+        if (active) setTemplates([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
+    const params = rangeParams(range);
 
-    api
-      .providers()
-      .then((data) => {
-        if (active) setProviders(data);
+    Promise.all([api.providers(), api.providerStats(params)])
+      .then(([providerData, statsData]) => {
+        if (!active) return;
+        setProviders(providerData);
+        setStats(statsData);
       })
       .catch((err) => {
         if (active) setError(err.message);
@@ -49,249 +61,181 @@ export default function Providers() {
     return () => {
       active = false;
     };
-  }, [reloadKey]);
+  }, [range, reloadKey]);
 
   useEffect(() => {
-    if (!notice) return undefined;
-    const timer = setTimeout(() => setNotice(""), 6000);
-    return () => clearTimeout(timer);
-  }, [notice]);
+    if (openAddSignal > 0) setModal({ provider: null });
+  }, [openAddSignal]);
 
-  const enabledCount = providers.filter((provider) => provider.enabled).length;
-  const secretCount = providers.filter((provider) => provider.has_secret).length;
-
-  function handleSaved(saved, keyProvided) {
-    setModal(null);
-    setNotice(
-      keyProvided
-        ? `Provider "${saved.name}" disimpan dan API key dienkripsi.`
-        : `Provider "${saved.name}" disimpan.`,
-    );
+  function handleSaved(saved, keyProvided) {    setModal(null);
+    pushToast({
+      tone: "success",
+      title: "Provider tersimpan",
+      message: keyProvided
+        ? `${saved.name} disimpan, API key dienkripsi di server.`
+        : `${saved.name} diperbarui.`,
+    });
     setReloadKey((value) => value + 1);
   }
 
   async function handleTest(provider) {
-    setTestState((current) => ({
-      ...current,
-      [provider.id]: { loading: true, result: null },
-    }));
-
+    setTestState((current) => ({ ...current, [provider.id]: { loading: true, result: null } }));
     let result;
     try {
       result = await api.testProvider(provider.id);
     } catch (err) {
       result = { ok: false, message: err.message };
     }
-
-    setTestState((current) => ({
-      ...current,
-      [provider.id]: { loading: false, result },
-    }));
+    setTestState((current) => ({ ...current, [provider.id]: { loading: false, result } }));
+    if (!result.ok) {
+      pushToast({ tone: "error", title: "Uji koneksi gagal", message: result.message });
+    }
   }
 
   async function handleToggle(provider) {
     setTogglingId(provider.id);
-    setActionError("");
     try {
       const updated = await api.updateProvider(provider.id, { enabled: !provider.enabled });
-      setProviders((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      );
+      setProviders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      pushToast({
+        tone: "success",
+        title: updated.enabled ? "Provider diaktifkan" : "Provider dinonaktifkan",
+        message: updated.name,
+      });
     } catch (err) {
-      setActionError(err.message);
+      pushToast({ tone: "error", title: "Gagal mengubah status", message: err.message });
     } finally {
       setTogglingId(null);
     }
   }
 
+  const enabledCount = providers.filter((provider) => provider.enabled).length;
+  const statsById = Object.fromEntries(stats.map((row) => [row.provider_id, row]));
+
   return (
-    <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">Konfigurasi</p>
-          <h2>Provider AI</h2>
-          <p>
-            Kelola endpoint provider dan API key. Key dienkripsi di server, tidak pernah
-            dikirim kembali ke browser, dan tidak dicatat di log.
-          </p>
-        </div>
-        <button type="button" className="button primary" onClick={() => setModal({ provider: null })}>
-          <Plus size={16} aria-hidden="true" />
-          Tambah provider
-        </button>
-      </section>
-
-      {notice ? (
-        <p className="notice success" role="status">
-          <CheckCircle2 size={16} aria-hidden="true" />
-          {notice}
-          <button type="button" className="notice-close" onClick={() => setNotice("")} aria-label="Tutup">
-            <X size={14} />
-          </button>
-        </p>
-      ) : null}
-
-      {actionError ? (
-        <p className="notice error" role="alert">
-          <TriangleAlert size={16} aria-hidden="true" />
-          {actionError}
+    <div className="page">
+      <PageHeader
+        title="Providers"
+        description="Endpoint upstream dan API key provider. Key dienkripsi di server dan tidak pernah dikirim kembali ke browser."
+        meta={
+          providers.length
+            ? `${providers.length} provider · ${enabledCount} aktif · ${providers.filter((p) => p.has_secret).length} key tersimpan`
+            : null
+        }
+        actions={
           <button
             type="button"
-            className="notice-close"
-            onClick={() => setActionError("")}
-            aria-label="Tutup"
-          >
-            <X size={14} />
-          </button>
-        </p>
-      ) : null}
-
-      {error ? (
-        <section className="panel error-panel" role="alert">
-          <TriangleAlert size={20} aria-hidden="true" />
-          <div>
-            <h2>Gagal memuat provider</h2>
-            <p>{error}</p>
-          </div>
-          <button type="button" className="button" onClick={() => setReloadKey((value) => value + 1)}>
-            <RefreshCw size={15} aria-hidden="true" />
-            Coba lagi
-          </button>
-        </section>
-      ) : null}
-
-      <section className="panel providers-panel">
-        <header className="panel-head">
-          <div>
-            <h2>Provider terdaftar</h2>
-            <p>
-              {providers.length} provider, {enabledCount} aktif, {secretCount} API key tersimpan
-            </p>
-          </div>
-          <button
-            type="button"
-            className="button small"
+            className="btn small"
             onClick={() => setReloadKey((value) => value + 1)}
             disabled={loading}
           >
             <RefreshCw size={14} aria-hidden="true" />
-            {loading ? "Memuat..." : "Muat ulang"}
+            {loading ? "Memuat" : "Muat ulang"}
           </button>
-        </header>
+        }
+      />
 
-        {loading && providers.length === 0 ? (
-          <div className="loading-panel">
-            <span className="spinner" aria-hidden="true" />
-            <p>Memuat provider...</p>
-          </div>
-        ) : providers.length === 0 ? (
-          <div className="empty-provider">
-            <Server size={24} aria-hidden="true" />
-            <p>Belum ada provider. Tambahkan provider pertama untuk mulai menguji koneksi.</p>
-          </div>
-        ) : (
-          <div className="table-scroll">
-            <table className="provider-table">
-              <thead>
-                <tr>
-                  <th scope="col">Provider</th>
-                  <th scope="col">Base URL</th>
-                  <th scope="col">API key</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="numeric">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {providers.map((provider) => {
-                  const test = testState[provider.id];
-                  const meta = [];
-                  if (test?.result?.status_code != null) meta.push(`HTTP ${test.result.status_code}`);
-                  if (test?.result?.latency_ms != null) meta.push(`${test.result.latency_ms} ms`);
-                  if (test?.result?.models_count != null) meta.push(`${test.result.models_count} model`);
+      {templates.length ? (
+        <section className="panel preset-panel">
+          <header className="preset-head">
+            <div className="preset-head-copy">
+              <h2>
+                <Sparkles size={15} aria-hidden="true" />
+                Preset provider gratis
+              </h2>
+              <p>Klik salah satu, base URL terisi otomatis. API key kamu tempel sendiri di modal.</p>
+            </div>
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setShowPresets((value) => !value)}
+              aria-expanded={showPresets}
+            >
+              <ChevronDown
+                size={14}
+                aria-hidden="true"
+                className={showPresets ? "flip" : ""}
+              />
+              {showPresets ? "Sembunyikan" : "Tampilkan"}
+            </button>
+          </header>
 
-                  return (
-                    <Fragment key={provider.id}>
-                      <tr>
-                        <td>
-                          <div className="provider-name">{provider.name}</div>
-                          <div className="provider-meta">
-                            <span className="adapter-tag">
-                              {ADAPTER_LABELS[provider.adapter_type] ?? provider.adapter_type}
-                            </span>
-                            <span className="provider-id">#{provider.id}</span>
-                          </div>
-                        </td>
-                        <td className="url-cell">
-                          <code title={provider.base_url}>{provider.base_url}</code>
-                        </td>
-                        <td>
-                          <span className={`chip ${provider.has_secret ? "ok" : "muted"}`}>
-                            {provider.has_secret ? "Terenkripsi" : "Belum ada"}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className={`status-chip ${provider.enabled ? "on" : "off"}`}
-                            onClick={() => handleToggle(provider)}
-                            disabled={togglingId === provider.id}
-                            aria-pressed={provider.enabled}
-                            title="Klik untuk mengubah status"
-                          >
-                            <span className="status-dot" aria-hidden="true" />
-                            {provider.enabled ? "Aktif" : "Nonaktif"}
-                          </button>
-                        </td>
-                        <td className="actions-cell">
-                          <div className="cell-actions">
-                            <button
-                              type="button"
-                              className="button small"
-                              onClick={() => handleTest(provider)}
-                              disabled={Boolean(test?.loading)}
-                            >
-                              <PlugZap size={14} aria-hidden="true" />
-                              {test?.loading ? "Menguji..." : "Tes"}
-                            </button>
-                            <button
-                              type="button"
-                              className="button small"
-                              onClick={() => setModal({ provider })}
-                            >
-                              <Pencil size={14} aria-hidden="true" />
-                              Edit
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+          {showPresets ? (
+            <div className="preset-strip">
+              {templates.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="preset-chip"
+                  title={`${item.free_note}${item.key_url ? ` — ${item.key_url}` : ""}`}
+                  onClick={() => setModal({ provider: null, template: item })}
+                >
+                  <span
+                    className={`preset-dot ${item.category === "local" ? "local" : ""}`}
+                    aria-hidden="true"
+                  />
+                  {item.name}
+                  <Plus size={11} aria-hidden="true" className="preset-chip-plus" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-                      {test?.result ? (
-                        <tr className="test-row">
-                          <td colSpan={5}>
-                            <div className={`test-result ${test.result.ok ? "ok" : "fail"}`}>
-                              {test.result.ok ? (
-                                <CheckCircle2 size={15} aria-hidden="true" />
-                              ) : (
-                                <TriangleAlert size={15} aria-hidden="true" />
-                              )}
-                              <span>{test.result.message}</span>
-                              {meta.length ? <span className="test-meta">{meta.join(" · ")}</span> : null}
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {error ? (
+        <ErrorState
+          title="Gagal memuat provider"
+          message={error}
+          onRetry={() => setReloadKey((value) => value + 1)}
+        />
+      ) : null}
+
+      {loading && providers.length === 0 ? <CardSkeletons count={3} /> : null}
+
+      {!loading && !error && providers.length === 0 ? (
+        <section className="panel">
+          <EmptyState
+            icon={Server}
+            title="Belum ada provider"
+            description="Tambahkan endpoint pertama, lalu uji koneksinya dari kartu provider."
+            action={
+              <button type="button" className="btn primary" onClick={() => setModal({ provider: null })}>
+                <Plus size={15} aria-hidden="true" />
+                Add Provider
+              </button>
+            }
+          />
+        </section>
+      ) : null}
+
+      {providers.length > 0 ? (
+        <div className="provider-grid">
+          {providers.map((provider) => (
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              stats={statsById[provider.id]}
+              test={testState[provider.id]}
+              onTest={handleTest}
+              onEdit={(item) => setModal({ provider: item })}
+              onToggle={handleToggle}
+              toggling={togglingId === provider.id}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <p className="field-note">
+        Penghapusan provider belum didukung backend: model yang masih terhubung akan menahan
+        penghapusan. Nonaktifkan provider agar request baru tidak dirutekan ke sana.
+      </p>
 
       {modal ? (
         <ProviderModal
           provider={modal.provider}
+          template={modal.template}
+          templates={templates}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

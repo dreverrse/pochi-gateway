@@ -1,52 +1,101 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import {
-  Boxes,
-  KeyRound,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  ScrollText,
-  Server,
-  ShieldCheck,
-  X,
-} from "lucide-react";
 
 import { api } from "./api/client.js";
+import { UiProvider, useUi } from "./app-context.jsx";
 import { clearAdminToken, getAdminToken, setAdminToken } from "./auth.js";
+import Sidebar, { PAGES } from "./components/Sidebar.jsx";
+import ToastStack from "./components/ToastStack.jsx";
+import Topbar from "./components/Topbar.jsx";
 import Login from "./pages/Login.jsx";
 
-const APIKeys = lazy(() => import("./pages/APIKeys.jsx"));
-const Models = lazy(() => import("./pages/Models.jsx"));
 const Overview = lazy(() => import("./pages/Overview.jsx"));
+const Chat = lazy(() => import("./pages/Chat.jsx"));
+const Workflows = lazy(() => import("./pages/Workflows.jsx"));
 const Providers = lazy(() => import("./pages/Providers.jsx"));
-const UsageLogs = lazy(() => import("./pages/UsageLogs.jsx"));
+const Models = lazy(() => import("./pages/Models.jsx"));
+const APIKeys = lazy(() => import("./pages/APIKeys.jsx"));
+const Analytics = lazy(() => import("./pages/Analytics.jsx"));
+const RequestLogs = lazy(() => import("./pages/RequestLogs.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx"));
 
-const PAGES = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard, Component: Overview },
-  { id: "providers", label: "Providers", icon: Server, Component: Providers },
-  { id: "models", label: "Models", icon: Boxes, Component: Models },
-  { id: "keys", label: "API Keys", icon: KeyRound, Component: APIKeys },
-  { id: "usage", label: "Usage Logs", icon: ScrollText, Component: UsageLogs },
-];
+const COMPONENTS = {
+  overview: Overview,
+  chat: Chat,
+  workflows: Workflows,
+  providers: Providers,
+  models: Models,
+  keys: APIKeys,
+  analytics: Analytics,
+  logs: RequestLogs,
+  settings: Settings,
+};
 
-export default function App() {
-  const [pageId, setPageId] = useState("overview");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+const COLLAPSE_KEY = "pochi_sidebar_collapsed";
+
+function readCollapsed() {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function PageFallback() {
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-header-copy">
+          <span className="skeleton" style={{ width: 180, height: 22, borderRadius: 8 }} />
+          <span className="skeleton" style={{ width: 320, height: 12, marginTop: 12 }} />
+        </div>
+      </div>
+      <div className="stat-grid" aria-hidden="true">
+        {[0, 1, 2, 3].map((index) => (
+          <article key={index} className="stat-card">
+            <span className="skeleton" style={{ width: "45%", height: 10 }} />
+            <span className="skeleton" style={{ width: "60%", height: 26, marginTop: 14 }} />
+            <span className="skeleton" style={{ width: "100%", height: 30, marginTop: 18 }} />
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Halaman aktif disimpan di hash supaya refresh dan bookmark tidak reset. */
+function readHashPage() {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  return PAGES.some((page) => page.id === raw) ? raw : "overview";
+}
+
+function Shell() {
+  const { search, setSearch } = useUi();
+  const [pageId, setPageId] = useState(readHashPage);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState("checking");
   const [token, setToken] = useState(getAdminToken);
+  const [addProviderSignal, setAddProviderSignal] = useState(0);
 
   useEffect(() => {
     let active = true;
-    api
-      .health()
-      .then(() => {
-        if (active) setApiStatus("online");
-      })
-      .catch(() => {
-        if (active) setApiStatus("offline");
-      });
+
+    function check() {
+      api
+        .health()
+        .then(() => {
+          if (active) setApiStatus("online");
+        })
+        .catch(() => {
+          if (active) setApiStatus("offline");
+        });
+    }
+
+    check();
+    const timer = setInterval(check, 60000);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -58,13 +107,49 @@ export default function App() {
     return () => window.removeEventListener("pochi:unauthorized", handleUnauthorized);
   }, []);
 
-  const current = PAGES.find((page) => page.id === pageId) ?? PAGES[0];
-  const CurrentPage = current.Component;
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      // localStorage diblokir; preferensi tidak disimpan.
+    }
+  }, [collapsed]);
 
-  function selectPage(id) {
-    setPageId(id);
-    setSidebarOpen(false);
-  }
+  useEffect(() => {
+    const target = `#/${pageId}`;
+    if (window.location.hash !== target) window.location.hash = target;
+  }, [pageId]);
+
+  useEffect(() => {
+    function handleHashChange() {
+      setPageId(readHashPage());
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pageId]);
+
+  const current = PAGES.find((page) => page.id === pageId) ?? PAGES[0];
+  const CurrentPage = COMPONENTS[current.id];
+
+  // Kalau nav sudah menampilkan halaman tapi bundelnya belum ikut ter-update
+  // (sisa HMR / tab lama), jangan diam-diam menampilkan Overview: muat ulang
+  // sekali saja supaya chunk halaman yang benar terambil.
+  useEffect(() => {
+    if (CurrentPage) return;
+    const guard = "pochi_page_reload_at";
+    try {
+      const last = Number(window.sessionStorage.getItem(guard) ?? 0);
+      if (Date.now() - last < 10000) return;
+      window.sessionStorage.setItem(guard, String(Date.now()));
+      window.location.reload();
+    } catch {
+      // sessionStorage diblokir; biarkan fallback di bawah yang tampil.
+    }
+  }, [CurrentPage]);
 
   function handleLogin(value) {
     setAdminToken(value);
@@ -76,7 +161,13 @@ export default function App() {
     clearAdminToken();
     setToken("");
     setPageId("overview");
-    setSidebarOpen(false);
+    setSearch("");
+    setMobileOpen(false);
+  }
+
+  function handleAddProvider() {
+    setPageId("providers");
+    setAddProviderSignal((value) => value + 1);
   }
 
   if (!token) {
@@ -84,101 +175,70 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Navigasi utama">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">P</div>
-          <div>
-            <strong>Pochi</strong>
-            <span>Gateway</span>
-          </div>
-          <button
-            type="button"
-            className="icon-button close-sidebar"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Tutup navigasi"
-          >
-            <X size={18} />
-          </button>
-        </div>
+    <div className={`app-shell ${collapsed ? "is-collapsed" : ""}`}>
+      <Sidebar
+        pageId={current.id}
+        onSelect={setPageId}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((value) => !value)}
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
+        apiStatus={apiStatus}
+        onLogout={handleLogout}
+      />
 
-        <nav className="nav">
-          <p className="nav-label">Monitoring</p>
-          {PAGES.map((page) => {
-            const Icon = page.icon;
-            const active = page.id === current.id;
-            return (
-              <button
-                key={page.id}
-                type="button"
-                className={`nav-item ${active ? "active" : ""}`}
-                onClick={() => selectPage(page.id)}
-                aria-current={active ? "page" : undefined}
-              >
-                <Icon size={17} aria-hidden="true" />
-                <span>{page.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="security-note">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <span>Local-first. Hanya 127.0.0.1.</span>
-          </div>
-          <code>127.0.0.1:8000</code>
-          <button type="button" className="logout-button" onClick={handleLogout}>
-            <LogOut size={15} aria-hidden="true" />
-            Keluar
-          </button>
-        </div>
-      </aside>
-
-      {sidebarOpen ? (
+      {mobileOpen ? (
         <button
           type="button"
           className="scrim"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setMobileOpen(false)}
           aria-label="Tutup navigasi"
         />
       ) : null}
 
-      <main className="main">
-        <header className="topbar">
-          <button
-            type="button"
-            className="icon-button menu-button"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Buka navigasi"
-          >
-            <Menu size={20} />
-          </button>
-          <div className="topbar-title">
-            <p className="eyebrow">Pochi Gateway</p>
-            <h1>{current.label}</h1>
-          </div>
-          <div className={`api-status ${apiStatus}`} title={`Status API: ${apiStatus}`}>
-            <span className="status-dot" aria-hidden="true" />
-            <span className="status-text">
-              {apiStatus === "online" ? "API online" : apiStatus === "offline" ? "API offline" : "Memeriksa API"}
-            </span>
-          </div>
-        </header>
+      <div className="app-main">
+        <Topbar
+          title={current.label}
+          apiStatus={apiStatus}
+          onOpenSidebar={() => setMobileOpen(true)}
+          onSearchSubmit={() => setPageId("logs")}
+          onOpenSettings={() => setPageId("settings")}
+          onOpenChat={() => setPageId("chat")}
+          onAddProvider={handleAddProvider}
+        />
 
-        <div className="content">
-          <Suspense
-            fallback={
-              <div className="loading-panel">
-                <span className="spinner" aria-hidden="true" />
-                <p>Memuat halaman...</p>
+        <main className="content">
+          {CurrentPage ? (
+            <Suspense fallback={<PageFallback />}>
+              <CurrentPage
+                onNavigate={setPageId}
+                apiStatus={apiStatus}
+                openAddSignal={addProviderSignal}
+              />
+            </Suspense>
+          ) : (
+            <div className="page">
+              <div className="empty-state">
+                <h2>Halaman belum termuat</h2>
+                <p>Bundel halaman ini belum ikut ter-update di tab lama. Muat ulang untuk mengambil versi terbaru.</p>
+                <button type="button" className="btn primary" onClick={() => window.location.reload()}>
+                  Muat ulang
+                </button>
               </div>
-            }
-          >
-            <CurrentPage />
-          </Suspense>
-        </div>
-      </main>
+            </div>
+          )}
+        </main>
+      </div>
+
+      <ToastStack />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <UiProvider>
+      <Shell />
+    </UiProvider>
   );
 }

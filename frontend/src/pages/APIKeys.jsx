@@ -1,33 +1,26 @@
 import { useEffect, useState } from "react";
-import {
-  Ban,
-  CheckCircle2,
-  KeyRound,
-  Pencil,
-  Plus,
-  RefreshCw,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { Ban, KeyRound, Pencil, Plus, RefreshCw } from "lucide-react";
 
 import { api } from "../api/client.js";
+import { useUi } from "../app-context.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import ErrorState from "../components/ErrorState.jsx";
+import PageHeader from "../components/PageHeader.jsx";
+import { TableSkeleton } from "../components/Skeleton.jsx";
+import StatusBadge from "../components/StatusBadge.jsx";
 import TokenRevealModal from "../components/TokenRevealModal.jsx";
 import VirtualKeyModal from "../components/VirtualKeyModal.jsx";
-import { formatBudget, formatDateTime } from "../utils/format.js";
+import { formatBudget, formatDateTime, formatUsd } from "../utils/format.js";
 
-const PERIOD_LABELS = {
-  daily: "harian",
-  monthly: "bulanan",
-};
+const PERIOD_LABELS = { daily: "harian", monthly: "bulanan" };
 
 export default function APIKeys() {
+  const { pushToast } = useUi();
   const [keys, setKeys] = useState([]);
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [actionError, setActionError] = useState("");
   const [modal, setModal] = useState(null);
   const [created, setCreated] = useState(null);
   const [revokeTarget, setRevokeTarget] = useState(null);
@@ -57,31 +50,20 @@ export default function APIKeys() {
     };
   }, [reloadKey]);
 
-  useEffect(() => {
-    if (!notice) return undefined;
-    const timer = setTimeout(() => setNotice(""), 6000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
-  const activeCount = keys.filter((key) => !key.revoked_at && key.enabled).length;
-  const revokedCount = keys.filter((key) => key.revoked_at).length;
-
   function handleSaved(saved, token) {
     setModal(null);
-    setActionError("");
-    setNotice(
-      token
-        ? `Key "${saved.name}" dibuat. Salin token yang ditampilkan sekarang.`
-        : `Key "${saved.name}" diperbarui.`,
-    );
     if (token) setCreated({ virtualKey: saved, token });
+    pushToast({
+      tone: "success",
+      title: token ? "Key dibuat" : "Key diperbarui",
+      message: token ? `${saved.name} — salin token sekarang, hanya tampil sekali.` : saved.name,
+    });
     setReloadKey((value) => value + 1);
   }
 
   async function handleRevoke() {
     if (!revokeTarget) return;
     setRevoking(true);
-    setActionError("");
     try {
       const updated = await api.revokeKey(revokeTarget.id);
       setKeys((current) =>
@@ -89,198 +71,168 @@ export default function APIKeys() {
           .map((key) => (key.id === updated.id ? updated : key))
           .sort((a, b) => Number(Boolean(a.revoked_at)) - Number(Boolean(b.revoked_at))),
       );
-      setNotice(`Key "${updated.name}" telah dicabut dan tidak dapat dipakai lagi.`);
+      pushToast({ tone: "success", title: "Key dicabut", message: `${updated.name} tidak bisa dipakai lagi.` });
       setRevokeTarget(null);
     } catch (err) {
       setRevokeTarget(null);
-      setActionError(err.message);
+      pushToast({ tone: "error", title: "Gagal mencabut key", message: err.message });
     } finally {
       setRevoking(false);
     }
   }
 
+  const activeCount = keys.filter((key) => !key.revoked_at && key.enabled).length;
+  const revokedCount = keys.filter((key) => key.revoked_at).length;
+
   return (
-    <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">Akses klien</p>
-          <h2>Virtual API keys</h2>
-          <p>
-            Key ini dipakai aplikasi klien untuk memanggil gateway. Server hanya menyimpan
-            hash token; token lengkap ditampilkan sekali saat key dibuat.
-          </p>
-        </div>
-        <button type="button" className="button primary" onClick={() => setModal({ virtualKey: null })}>
-          <Plus size={16} aria-hidden="true" />
-          Buat key
-        </button>
-      </section>
-
-      {notice ? (
-        <p className="notice success" role="status">
-          <CheckCircle2 size={16} aria-hidden="true" />
-          {notice}
-          <button type="button" className="notice-close" onClick={() => setNotice("")} aria-label="Tutup">
-            <X size={14} />
-          </button>
-        </p>
-      ) : null}
-
-      {actionError ? (
-        <p className="notice error" role="alert">
-          <TriangleAlert size={16} aria-hidden="true" />
-          {actionError}
-          <button
-            type="button"
-            className="notice-close"
-            onClick={() => setActionError("")}
-            aria-label="Tutup"
-          >
-            <X size={14} />
-          </button>
-        </p>
-      ) : null}
+    <div className="page">
+      <PageHeader
+        title="API Keys"
+        description="Virtual key untuk klien. Server menyimpan hash SHA-256; token lengkap hanya tampil sekali saat dibuat. Key ini berbeda dari provider API key."
+        meta={keys.length ? `${keys.length} key · ${activeCount} aktif · ${revokedCount} dicabut` : null}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => setReloadKey((value) => value + 1)}
+              disabled={loading}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              {loading ? "Memuat" : "Muat ulang"}
+            </button>
+            <button type="button" className="btn primary" onClick={() => setModal({ virtualKey: null })}>
+              <Plus size={15} aria-hidden="true" />
+              Create Key
+            </button>
+          </>
+        }
+      />
 
       {error ? (
-        <section className="panel error-panel" role="alert">
-          <TriangleAlert size={20} aria-hidden="true" />
-          <div>
-            <h2>Gagal memuat virtual key</h2>
-            <p>{error}</p>
-          </div>
-          <button type="button" className="button" onClick={() => setReloadKey((value) => value + 1)}>
-            <RefreshCw size={15} aria-hidden="true" />
-            Coba lagi
-          </button>
-        </section>
+        <ErrorState
+          title="Gagal memuat virtual key"
+          message={error}
+          onRetry={() => setReloadKey((value) => value + 1)}
+        />
       ) : null}
 
-      <section className="panel keys-panel">
-        <header className="panel-head">
-          <div>
-            <h2>Key terdaftar</h2>
-            <p>
-              {keys.length} key, {activeCount} aktif, {revokedCount} dicabut
-            </p>
-          </div>
-          <button
-            type="button"
-            className="button small"
-            onClick={() => setReloadKey((value) => value + 1)}
-            disabled={loading}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            {loading ? "Memuat..." : "Muat ulang"}
-          </button>
-        </header>
-
+      <section className="panel">
         {loading && keys.length === 0 ? (
-          <div className="loading-panel">
-            <span className="spinner" aria-hidden="true" />
-            <p>Memuat virtual key...</p>
-          </div>
+          <TableSkeleton rows={4} columns={6} />
         ) : keys.length === 0 ? (
-          <div className="empty-provider">
-            <KeyRound size={24} aria-hidden="true" />
-            <p>Belum ada virtual key. Buat key pertama untuk memberi akses ke gateway.</p>
-          </div>
+          <EmptyState
+            icon={KeyRound}
+            title="Belum ada virtual key"
+            description="Buat key pertama untuk memberi akses ke gateway dengan batas model dan anggaran."
+            action={
+              <button type="button" className="btn primary" onClick={() => setModal({ virtualKey: null })}>
+                <Plus size={15} aria-hidden="true" />
+                Create Key
+              </button>
+            }
+          />
         ) : (
           <div className="table-scroll">
-            <table className="key-table">
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th scope="col">Nama</th>
+                  <th scope="col">Name</th>
                   <th scope="col">Prefix</th>
-                  <th scope="col">Model</th>
-                  <th scope="col">Anggaran</th>
+                  <th scope="col">Models</th>
+                  <th scope="col">Budget</th>
                   <th scope="col">Rate limit</th>
                   <th scope="col">Status</th>
-                  <th scope="col">Terakhir dipakai</th>
-                  <th scope="col" className="numeric">Aksi</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">Last used</th>
+                  <th scope="col" className="num">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {keys.map((key) => {
                   const revoked = Boolean(key.revoked_at);
                   const visibleModels = key.allowed_models.slice(0, 2);
-                  const hiddenModels = key.allowed_models.length - visibleModels.length;
+                  const hidden = key.allowed_models.length - visibleModels.length;
+                  const limit = key.budget_limit_usd;
+                  const spent = key.budget_spent_usd ?? 0;
+                  const ratio = limit ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
 
                   return (
-                    <tr key={key.id} className={revoked ? "revoked-row" : ""}>
+                    <tr key={key.id} className={revoked ? "row-muted" : ""}>
                       <td>
-                        <div className="key-name">{key.name}</div>
-                        <div className="provider-meta">
-                          <span className="provider-id">#{key.id}</span>
-                        </div>
+                        <div className="cell-strong">{key.name}</div>
+                        <div className="cell-sub mono-sm">#{key.id}</div>
                       </td>
                       <td>
-                        <code className="key-prefix" title="Hanya prefix yang ditampilkan">
+                        <code className="mono-sm" title="Hanya prefix yang ditampilkan">
                           {key.key_prefix}…
                         </code>
                       </td>
                       <td>
                         {key.allowed_models.length === 0 ? (
-                          <span className="chip muted">Semua model</span>
+                          <StatusBadge tone="neutral" label="Semua model" dot={false} />
                         ) : (
-                          <div className="model-chips">
+                          <div className="chip-row">
                             {visibleModels.map((model) => (
-                              <span key={model} className="model-chip" title={model}>
+                              <span key={model} className="chip" title={model}>
                                 {model}
                               </span>
                             ))}
-                            {hiddenModels > 0 ? (
-                              <span
-                                className="model-chip more"
-                                title={key.allowed_models.join(", ")}
-                              >
-                                +{hiddenModels}
+                            {hidden > 0 ? (
+                              <span className="chip more" title={key.allowed_models.join(", ")}>
+                                +{hidden}
                               </span>
                             ) : null}
                           </div>
                         )}
                       </td>
                       <td>
-                        <div className="budget-cell">
-                          <strong>{formatBudget(key.budget_limit_usd)}</strong>
-                          {key.budget_limit_usd !== null ? (
-                            <span>/ {PERIOD_LABELS[key.budget_period] ?? key.budget_period}</span>
+                        <div className="cell-strong">
+                          {formatBudget(limit)}
+                          {limit ? (
+                            <span className="cell-sub"> / {PERIOD_LABELS[key.budget_period]}</span>
                           ) : null}
                         </div>
-                        {key.budget_spent_usd > 0 ? (
-                          <div className="budget-spent" title="Terpakai periode ini">
-                            Terpakai {formatBudget(key.budget_spent_usd)}
-                          </div>
-                        ) : null}
+                        {limit ? (
+                          <>
+                            <div className="progress" aria-hidden="true">
+                              <span
+                                className={ratio >= 90 ? "warn" : ""}
+                                style={{ width: `${ratio}%` }}
+                              />
+                            </div>
+                            <div className="cell-sub">
+                              {formatUsd(spent)} terpakai ({ratio}%)
+                            </div>
+                          </>
+                        ) : (
+                          <div className="cell-sub">{formatUsd(spent)} terpakai</div>
+                        )}
                       </td>
                       <td>
                         {key.rate_limit_rpm === null || key.rate_limit_rpm === undefined ? (
-                          <span className="muted-text">Default</span>
+                          <span className="cell-sub">Default</span>
                         ) : (
-                          <span className="chip muted">{key.rate_limit_rpm} / mnt</span>
+                          <span className="mono-sm">{key.rate_limit_rpm} / mnt</span>
                         )}
                       </td>
                       <td>
                         {revoked ? (
-                          <span className="status-chip revoked">
-                            <span className="status-dot" aria-hidden="true" />
-                            Dicabut
-                          </span>
+                          <StatusBadge tone="err" label="Revoked" />
                         ) : (
-                          <span className={`status-chip ${key.enabled ? "on" : "off"}`}>
-                            <span className="status-dot" aria-hidden="true" />
-                            {key.enabled ? "Aktif" : "Nonaktif"}
-                          </span>
+                          <StatusBadge tone={key.enabled ? "ok" : "neutral"} label={key.enabled ? "Active" : "Disabled"} />
                         )}
                       </td>
-                      <td className="time-cell">{formatDateTime(key.last_used_at)}</td>
-                      <td className="actions-cell">
+                      <td className="mono-sm">{formatDateTime(key.created_at)}</td>
+                      <td className="mono-sm">{formatDateTime(key.last_used_at)}</td>
+                      <td className="num">
                         {revoked ? (
-                          <span className="muted-text">—</span>
+                          <span className="cell-sub">—</span>
                         ) : (
-                          <div className="cell-actions">
+                          <div className="row-actions">
                             <button
                               type="button"
-                              className="button small"
+                              className="btn small"
                               onClick={() => setModal({ virtualKey: key })}
                             >
                               <Pencil size={14} aria-hidden="true" />
@@ -288,11 +240,11 @@ export default function APIKeys() {
                             </button>
                             <button
                               type="button"
-                              className="button small danger-ghost"
+                              className="btn small danger-ghost"
                               onClick={() => setRevokeTarget(key)}
                             >
                               <Ban size={14} aria-hidden="true" />
-                              Cabut
+                              Revoke
                             </button>
                           </div>
                         )}
@@ -325,9 +277,9 @@ export default function APIKeys() {
 
       {revokeTarget ? (
         <ConfirmDialog
-          title="Cabut virtual key?"
-          message={`Key "${revokeTarget.name}" akan langsung dinonaktifkan dan tidak dapat dipakai lagi. Tindakan ini permanen.`}
-          confirmLabel="Cabut key"
+          title="Revoke key ini?"
+          message={`Key "${revokeTarget.name}" langsung dinonaktifkan dan tidak dapat diaktifkan kembali. Klien yang memakainya akan berhenti pada request berikutnya.`}
+          confirmLabel="Revoke key"
           busy={revoking}
           onCancel={() => setRevokeTarget(null)}
           onConfirm={handleRevoke}

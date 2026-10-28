@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, X } from "lucide-react";
+import { ExternalLink, KeyRound, Sparkles, X } from "lucide-react";
 
 import { api } from "../api/client.js";
 
@@ -8,12 +8,13 @@ const ADAPTERS = [
   { value: "inception", label: "Inception Labs" },
 ];
 
-export default function ProviderModal({ provider, onClose, onSaved }) {
+export default function ProviderModal({ provider, template, templates, onClose, onSaved }) {
   const editing = Boolean(provider);
+  const [preset, setPreset] = useState(!editing ? template ?? null : null);
   const [form, setForm] = useState({
-    name: provider?.name ?? "",
-    base_url: provider?.base_url ?? "",
-    adapter_type: provider?.adapter_type ?? "openai_compatible",
+    name: provider?.name ?? preset?.name ?? "",
+    base_url: provider?.base_url ?? preset?.base_url ?? "",
+    adapter_type: provider?.adapter_type ?? preset?.adapter_type ?? "openai_compatible",
     enabled: provider?.enabled ?? true,
     api_key: "",
   });
@@ -35,6 +36,17 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function applyTemplate(next) {
+    setPreset(next);
+    if (!next) return;
+    setForm((current) => ({
+      ...current,
+      name: next.name,
+      base_url: next.base_url,
+      adapter_type: next.adapter_type,
+    }));
   }
 
   async function handleSubmit(event) {
@@ -73,7 +85,9 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
         <header className="modal-head">
           <div>
             <p className="eyebrow">Provider</p>
-            <h2 id="provider-modal-title">{editing ? "Edit provider" : "Tambah provider"}</h2>
+            <h2 id="provider-modal-title">
+              {editing ? "Edit provider" : preset ? `Tambah ${preset.name}` : "Tambah provider"}
+            </h2>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Tutup" disabled={submitting}>
             <X size={18} />
@@ -81,6 +95,54 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
         </header>
 
         <form className="modal-form" onSubmit={handleSubmit}>
+          {!editing && templates?.length ? (
+            <label className="field">
+              <span>Isi dari preset</span>
+              <select
+                value={preset?.id ?? ""}
+                onChange={(event) =>
+                  applyTemplate(templates.find((item) => item.id === event.target.value) ?? null)
+                }
+              >
+                <option value="">Tanpa preset</option>
+                {templates.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.category === "local" ? " (lokal)" : ""}
+                  </option>
+                ))}
+              </select>
+              <small>Memilih preset hanya mengisi nama, base URL, dan adapter. Bisa diubah manual.</small>
+            </label>
+          ) : null}
+
+          {preset ? (
+            <div className="preset-banner">
+              <header>
+                <Sparkles size={14} aria-hidden="true" />
+                <strong>Preset {preset.name}</strong>
+                <span className={`preset-tag ${preset.category === "local" ? "local" : ""}`}>
+                  {preset.category === "local" ? "Lokal" : "Gratis"}
+                </span>
+              </header>
+              <p>{preset.free_note}</p>
+              <div className="preset-links">
+                {preset.key_url ? (
+                  <a href={preset.key_url} target="_blank" rel="noreferrer noopener">
+                    <KeyRound size={12} aria-hidden="true" />
+                    Ambil API key
+                  </a>
+                ) : null}
+                {preset.docs_url ? (
+                  <a href={preset.docs_url} target="_blank" rel="noreferrer noopener">
+                    <ExternalLink size={12} aria-hidden="true" />
+                    Dokumentasi
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <label className="field">
             <span>Nama provider</span>
             <input
@@ -104,7 +166,12 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
               maxLength={500}
               required
             />
-            <small>Gunakan URL dasar API, biasanya berakhiran /v1. Path /models dipakai saat uji koneksi.</small>
+            <small>
+              Gunakan URL dasar API, biasanya berakhiran /v1. Path /models dipakai saat uji koneksi.
+              {preset?.base_url.includes("ACCOUNT_ID")
+                ? " Ganti ACCOUNT_ID dengan account ID akun kamu."
+                : ""}
+            </small>
           </label>
 
           <div className="form-row">

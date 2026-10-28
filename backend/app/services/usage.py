@@ -1,10 +1,23 @@
 import csv
 import io
 import json
+import re
 import sqlite3
 
 from app.db import usage_repository
+from app.db.time_window import Window
 from app.models.usage import UsageLogOut, UsageLogsPage
+
+MAX_ERROR_LENGTH = 200
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_error(value: str | None) -> str | None:
+    """Kode error berasal dari provider; jangan pernah tampilkan verbatim mentah."""
+    if not value:
+        return None
+    cleaned = CONTROL_CHARACTERS.sub("", str(value)).strip()
+    return cleaned[:MAX_ERROR_LENGTH] or None
 
 
 def _to_out(row: sqlite3.Row) -> UsageLogOut:
@@ -22,26 +35,32 @@ def _to_out(row: sqlite3.Row) -> UsageLogOut:
         status_code=row["status_code"],
         duration_ms=row["duration_ms"],
         streamed=bool(row["streamed"]),
-        error_code=row["error_code"],
+        error_code=_sanitize_error(row["error_code"]),
         created_at=row["created_at"],
     )
 
 
 def list_logs(
-    days: int,
+    days: int | None,
+    hours: int | None,
     status: str,
     model: str | None,
     key_id: int | None,
     page: int,
     page_size: int,
+    provider_id: int | None = None,
+    search: str | None = None,
 ) -> UsageLogsPage:
+    window = Window.build(days=days, hours=hours)
     rows, total = usage_repository.list_request_logs(
-        days=days,
+        window=window,
         status=status,
         model=model.strip() if model else None,
         key_id=key_id,
         page=page,
         page_size=page_size,
+        provider_id=provider_id,
+        search=search,
     )
     total_pages = max(1, (total + page_size - 1) // page_size)
     return UsageLogsPage(
@@ -87,23 +106,29 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "status_code": row["status_code"],
         "duration_ms": row["duration_ms"],
         "streamed": bool(row["streamed"]),
-        "error_code": row["error_code"],
+        "error_code": _sanitize_error(row["error_code"]),
         "created_at": row["created_at"],
     }
 
 
 def export_logs(
     format: str,
-    days: int,
+    days: int | None,
+    hours: int | None,
     status: str,
     model: str | None,
     key_id: int | None,
+    provider_id: int | None = None,
+    search: str | None = None,
 ) -> tuple[str, str, bytes]:
+    window = Window.build(days=days, hours=hours)
     rows = usage_repository.list_request_logs_all(
-        days=days,
+        window=window,
         status=status,
         model=model.strip() if model else None,
         key_id=key_id,
+        provider_id=provider_id,
+        search=search,
     )
     if format == "csv":
         buf = io.StringIO()

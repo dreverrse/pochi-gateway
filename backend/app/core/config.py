@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Pochi Gateway"
-    app_version: str = "0.6.0"
+    app_version: str = "0.8.0"
     db_path: Path = PROJECT_ROOT / "data" / "pochi.db"
     seed_demo: bool = True
     cors_origins: list[str] = [
@@ -25,10 +25,12 @@ class Settings(BaseSettings):
     admin_token: str = ""
     admin_token_path: Path = PROJECT_ROOT / "data" / "admin_token"
     secret_key_path: Path = PROJECT_ROOT / "data" / "secret.key"
+    allow_private_provider_urls: bool = True
     provider_timeout_seconds: float = 8.0
     gateway_timeout_seconds: float = 120.0
     gateway_connect_timeout_seconds: float = 10.0
     gateway_rate_limit_rpm: int = 60
+    workflow_scheduler_enabled: bool = True
 
 
 settings = Settings()

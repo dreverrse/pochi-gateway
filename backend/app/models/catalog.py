@@ -22,6 +22,8 @@ class ModelCreate(BaseModel):
     provider_id: int = Field(gt=0)
     provider_model: str = Field(min_length=1, max_length=200)
     enabled: bool = True
+    supports_streaming: bool = False
+    is_default: bool = False
     input_usd_per_million: float | None = Field(default=None, ge=0, le=1_000_000)
     output_usd_per_million: float | None = Field(default=None, ge=0, le=1_000_000)
 
@@ -50,6 +52,8 @@ class ModelUpdate(BaseModel):
     provider_id: int | None = Field(default=None, gt=0)
     provider_model: str | None = Field(default=None, max_length=200)
     enabled: bool | None = None
+    supports_streaming: bool | None = None
+    is_default: bool | None = None
     input_usd_per_million: float | None = Field(default=None, ge=0, le=1_000_000)
     output_usd_per_million: float | None = Field(default=None, ge=0, le=1_000_000)
 
@@ -84,6 +88,8 @@ class ModelOut(BaseModel):
     provider_model: str
     provider_name: str
     enabled: bool
+    supports_streaming: bool = False
+    is_default: bool = False
     input_usd_per_million: float | None = None
     output_usd_per_million: float | None = None
     price_updated_at: str | None = None

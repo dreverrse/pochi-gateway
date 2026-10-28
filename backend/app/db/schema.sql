@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS models (
     provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE RESTRICT,
     provider_model TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    supports_streaming INTEGER NOT NULL DEFAULT 0 CHECK (supports_streaming IN (0, 1)),
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -88,3 +90,76 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_virtual_key ON request_logs(virtual_
 CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status_code);
 CREATE INDEX IF NOT EXISTS idx_model_prices_lookup ON model_prices(provider_model, effective_from);
 CREATE INDEX IF NOT EXISTS idx_virtual_keys_prefix ON virtual_keys(key_prefix);
+
+CREATE TABLE IF NOT EXISTS workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    definition TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+    webhook_token TEXT UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'error')),
+    trigger TEXT NOT NULL,
+    input TEXT,
+    output TEXT,
+    error TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('success', 'error', 'skipped')),
+    output TEXT,
+    error TEXT,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    system_prompt TEXT NOT NULL DEFAULT '',
+    temperature REAL,
+    max_tokens INTEGER,
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'complete'
+        CHECK (status IN ('complete', 'streaming', 'error', 'stopped')),
+    model TEXT,
+    provider_name TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    cost_usd REAL,
+    cost_status TEXT,
+    duration_ms INTEGER,
+    error_message TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation
+    ON conversation_messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);

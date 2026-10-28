@@ -120,7 +120,7 @@ def get_model_route(public_name: str) -> sqlite3.Row | None:
 
 def create_request_log(
     request_id: str,
-    virtual_key_id: int,
+    virtual_key_id: int | None,
     provider_id: int,
     public_model: str,
     provider_model: str,

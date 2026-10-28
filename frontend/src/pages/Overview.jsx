@@ -1,65 +1,64 @@
-import { useEffect, useState } from "react";
-import {
-  Activity,
-  Coins,
-  Gauge,
-  RefreshCw,
-  Timer,
-  TriangleAlert,
-  Zap,
-} from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, Coins, Gauge, RefreshCw, Server, Timer, Zap } from "lucide-react";
 
 import { api } from "../api/client.js";
+import { useUi } from "../app-context.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import ErrorState from "../components/ErrorState.jsx";
+import PageHeader from "../components/PageHeader.jsx";
+import RequestDetailModal from "../components/RequestDetailModal.jsx";
+import { CardSkeletons, TableSkeleton } from "../components/Skeleton.jsx";
 import StatCard from "../components/StatCard.jsx";
-import UsageTable from "../components/UsageTable.jsx";
+import StatusBadge from "../components/StatusBadge.jsx";
+import UsageChart from "../components/UsageChart.jsx";
 import {
   formatCompact,
+  formatDelta,
   formatDuration,
   formatNumber,
-  formatPercent,
+  formatRate,
+  formatTime,
   formatUsd,
 } from "../utils/format.js";
+import { rangeFromId, rangeLabel, rangeParams, rangeWindowLabel } from "../utils/range.js";
 
-const RANGES = [
-  { days: 7, label: "7 hari" },
-  { days: 14, label: "14 hari" },
-  { days: 30, label: "30 hari" },
-];
+const COST_TONES = { known: "ok", estimated: "warn", unknown: "neutral" };
 
-const tooltipStyle = {
-  background: "#111a33",
-  border: "1px solid #263457",
-  borderRadius: 10,
-  color: "#e6ecff",
-  fontSize: 12,
-};
+function rateDelta(current, previous) {
+  const a = current.successful_requests / (current.total_requests || 1);
+  const b = previous.successful_requests / (previous.total_requests || 1);
+  if (!previous.total_requests) return null;
+  const diff = (a - b) * 100;
+  return {
+    direction: diff > 0.05 ? "up" : diff < -0.05 ? "down" : "flat",
+    label: `${diff > 0 ? "+" : ""}${diff.toFixed(1)}pp`,
+  };
+}
 
-export default function Overview() {
-  const [days, setDays] = useState(14);
+export default function Overview({ onNavigate }) {
+  const { range } = useUi();
+  const window = rangeFromId(range);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [metric, setMetric] = useState("requests");
+  const [detail, setDetail] = useState(null);
 
   useEffect(() => {
     let active = true;
+    const params = rangeParams(range);
     setLoading(true);
     setError("");
-    setData(null);
 
-    api
-      .summary(days)
-      .then((payload) => {
-        if (active) setData(payload);
+    Promise.all([
+      api.summary(params),
+      api.providerStats(params),
+      api.usageLogs({ ...params, pageSize: 8 }),
+    ])
+      .then(([summary, providers, logs]) => {
+        if (!active) return;
+        setData({ summary, providers, logs: logs.items });
       })
       .catch((err) => {
         if (active) setError(err.message);
@@ -71,179 +70,283 @@ export default function Overview() {
     return () => {
       active = false;
     };
-  }, [days, reloadKey]);
+  }, [range, reloadKey]);
+
+  const summary = data?.summary;
+  const previous = summary?.previous;
+
+  const sparklines = useMemo(() => {
+    const points = summary?.timeseries ?? [];
+    return {
+      requests: points.map((point) => point.requests),
+      tokens: points.map((point) => point.input_tokens + point.output_tokens),
+      cost: points.map((point) => point.cost_usd),
+      success: points.map((point) =>
+        point.requests ? (point.successful_requests / point.requests) * 100 : 0,
+      ),
+    };
+  }, [summary]);
+
+  const totalCost = (summary?.known_cost_usd ?? 0) + (summary?.estimated_cost_usd ?? 0);
+  const previousCost = previous ? previous.known_cost_usd + previous.estimated_cost_usd : 0;
+  const totalTokens = (summary?.input_tokens ?? 0) + (summary?.output_tokens ?? 0);
+  const previousTokens = previous ? previous.input_tokens + previous.output_tokens : 0;
+  const providerRows = data?.providers ?? [];
+  const maxProviderRequests = Math.max(1, ...providerRows.map((row) => row.requests));
 
   return (
-    <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">Local monitoring</p>
-          <h2>Ringkasan penggunaan</h2>
-          <p>
-            Metrik {days} hari terakhir. Biaya diketahui dan estimasi ditampilkan terpisah,
-            sedangkan biaya yang tidak diketahui tidak dihitung sebagai nol.
-          </p>
-        </div>
-        <div className="range-switch" role="group" aria-label="Rentang waktu">
-          {RANGES.map((range) => (
-            <button
-              key={range.days}
-              type="button"
-              className={days === range.days ? "active" : ""}
-              onClick={() => setDays(range.days)}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
-      </section>
+    <div className="page">
+      <PageHeader
+        title="Overview"
+        description={`Ringkasan pemakaian gateway ${rangeLabel(range)}. Biaya diketahui dan estimasi dipisah; biaya tak dikenal tidak dihitung nol.`}
+        actions={
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setReloadKey((value) => value + 1)}
+            disabled={loading}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            {loading ? "Memuat" : "Muat ulang"}
+          </button>
+        }
+      />
 
       {error ? (
-        <section className="panel error-panel" role="alert">
-          <TriangleAlert size={20} aria-hidden="true" />
-          <div>
-            <h2>Gagal memuat data</h2>
-            <p>{error}. Pastikan backend berjalan di 127.0.0.1:8000.</p>
-          </div>
-          <button type="button" className="button" onClick={() => setReloadKey((value) => value + 1)}>
-            <RefreshCw size={15} aria-hidden="true" />
-            Coba lagi
-          </button>
-        </section>
+        <ErrorState
+          title="Gagal memuat ringkasan"
+          message={`${error}. Pastikan backend berjalan di 127.0.0.1:8000.`}
+          onRetry={() => setReloadKey((value) => value + 1)}
+        />
       ) : null}
 
-      {loading && !data ? (
-        <section className="panel loading-panel">
-          <span className="spinner" aria-hidden="true" />
-          <p>Memuat data penggunaan...</p>
-        </section>
-      ) : null}
+      {loading && !summary ? <CardSkeletons /> : null}
 
-      {data ? (
+      {summary ? (
         <>
           <section className="stat-grid">
             <StatCard
-              label="Total request"
-              value={formatNumber(data.total_requests)}
-              hint={`${formatNumber(data.successful_requests)} sukses, ${formatNumber(data.failed_requests)} gagal`}
+              label="Total Requests"
+              value={formatNumber(summary.total_requests)}
+              hint={`${formatNumber(summary.successful_requests)} sukses · ${formatNumber(summary.failed_requests)} gagal`}
+              delta={previous ? formatDelta(summary.total_requests, previous.total_requests) : null}
+              sparkline={sparklines.requests}
               icon={Activity}
             />
             <StatCard
-              label="Tingkat sukses"
-              value={formatPercent(data.successful_requests, data.total_requests)}
-              hint={`${formatNumber(data.failed_requests)} request gagal`}
-              icon={Gauge}
-            />
-            <StatCard
-              label="Total token"
-              value={formatCompact(data.input_tokens + data.output_tokens)}
-              hint={`${formatCompact(data.input_tokens)} input, ${formatCompact(data.output_tokens)} output`}
+              label="Total Tokens"
+              value={formatCompact(totalTokens)}
+              hint={`${formatCompact(summary.input_tokens)} input · ${formatCompact(summary.output_tokens)} output`}
+              delta={previous ? formatDelta(totalTokens, previousTokens) : null}
+              sparkline={sparklines.tokens}
+              sparkColor="#8EE7C8"
               icon={Zap}
             />
             <StatCard
-              label="Biaya diketahui"
-              value={formatUsd(data.known_cost_usd)}
-              hint="Berdasarkan usage resmi provider"
+              label="Estimated Cost"
+              value={formatUsd(totalCost)}
+              hint={`${formatUsd(summary.known_cost_usd)} resmi · ${formatUsd(summary.estimated_cost_usd)} estimasi`}
+              delta={previous ? formatDelta(totalCost, previousCost) : null}
+              sparkline={sparklines.cost}
+              sparkColor="#F5C97B"
               icon={Coins}
-              tone="known"
             />
             <StatCard
-              label="Biaya estimasi"
-              value={formatUsd(data.estimated_cost_usd)}
-              hint="Tokenizer atau usage tidak lengkap"
-              icon={Coins}
-              tone="estimated"
-            />
-            <StatCard
-              label="Rata-rata respons"
-              value={formatDuration(data.avg_duration_ms)}
-              hint="Durasi request selesai"
-              icon={Timer}
+              label="Success Rate"
+              value={formatRate(
+                summary.total_requests
+                  ? (summary.successful_requests / summary.total_requests) * 100
+                  : null,
+              )}
+              hint={`${formatNumber(summary.failed_requests)} request gagal`}
+              delta={previous ? rateDelta(summary, previous) : null}
+              sparkline={sparklines.success}
+              sparkColor="#7DD3A8"
+              icon={Gauge}
             />
           </section>
 
-          {data.unknown_cost_requests > 0 ? (
-            <p className="notice">
-              <TriangleAlert size={16} aria-hidden="true" />
-              {formatNumber(data.unknown_cost_requests)} request memiliki biaya tidak diketahui dan
-              tidak dimasukkan ke total biaya.
+          {summary.unknown_cost_requests > 0 ? (
+            <p className="notice warn">
+              <Coins size={15} aria-hidden="true" />
+              {formatNumber(summary.unknown_cost_requests)} request tanpa harga model. Biaya
+              mereka tidak dihitung sebagai nol dan tidak masuk total.
             </p>
           ) : null}
 
-          <section className="panel chart-panel">
+          <UsageChart
+            data={summary.timeseries}
+            metric={metric}
+            onMetricChange={setMetric}
+            hourly={Boolean(window.hours)}
+          />
+
+          <div className="overview-split">
+            <section className="panel">
+              <header className="panel-head">
+                <div>
+                  <h2>Provider summary</h2>
+                  <p>Distribusi beban antar provider terdaftar</p>
+                </div>
+                <button type="button" className="btn ghost small" onClick={() => onNavigate?.("providers")}>
+                  Kelola
+                </button>
+              </header>
+
+              {providerRows.length === 0 ? (
+                <EmptyState
+                  icon={Server}
+                  title="Belum ada provider"
+                  description="Tambahkan provider untuk mulai meneruskan request."
+                />
+              ) : (
+                <ul className="provider-summary">
+                  {providerRows.map((row) => {
+                    const share = Math.round((row.requests / maxProviderRequests) * 100);
+                    return (
+                      <li key={row.provider_id}>
+                        <div className="provider-summary-head">
+                          <span className="provider-summary-name">{row.name}</span>
+                          <span className="provider-summary-value">
+                            {formatNumber(row.requests)} req
+                          </span>
+                        </div>
+                        <div className="share-bar" aria-hidden="true">
+                          <span style={{ width: `${share}%` }} />
+                        </div>
+                        <div className="provider-summary-meta">
+                          <span>{formatCompact(row.input_tokens + row.output_tokens)} token</span>
+                          <span>{formatUsd(row.cost_usd)}</span>
+                          <span>{row.models_count} model</span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section className="panel">
+              <header className="panel-head">
+                <div>
+                  <h2>Kualitas layanan</h2>
+                  <p>Periode ini {rangeWindowLabel(range)}</p>
+                </div>
+              </header>
+              <dl className="metric-list">
+                <div>
+                  <dt>
+                    <Timer size={14} aria-hidden="true" /> Rata-rata respons
+                  </dt>
+                  <dd>{formatDuration(summary.avg_duration_ms)}</dd>
+                </div>
+                <div>
+                  <dt>Success rate</dt>
+                  <dd>
+                    {formatRate(
+                      summary.total_requests
+                        ? (summary.successful_requests / summary.total_requests) * 100
+                        : null,
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Biaya tak diketahui</dt>
+                  <dd>{formatNumber(summary.unknown_cost_requests)} request</dd>
+                </div>
+                <div>
+                  <dt>Provider aktif</dt>
+                  <dd>
+                    {providerRows.filter((row) => row.requests > 0).length} / {providerRows.length}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          </div>
+
+          <section className="panel">
             <header className="panel-head">
               <div>
-                <h2>Token per hari</h2>
-                <p>Input dan output dari request yang tercatat</p>
+                <h2>Recent requests</h2>
+                <p>Delapan request terakhir pada rentang ini</p>
               </div>
-              <span className="legend">
-                <span className="legend-dot input" /> Input
-                <span className="legend-dot output" /> Output
-              </span>
+              <button type="button" className="btn ghost small" onClick={() => onNavigate?.("logs")}>
+                Lihat semua
+              </button>
             </header>
-            <div className="chart-wrap">
-              <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={data.timeseries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="inputGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#7c9cff" stopOpacity={0.45} />
-                      <stop offset="95%" stopColor="#7c9cff" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="outputGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4fd1b8" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#4fd1b8" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2a48" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={(value) => value.slice(5).replace("-", "/")}
-                    stroke="#7f8cad"
-                    tickLine={false}
-                    axisLine={false}
-                    fontSize={12}
-                  />
-                  <YAxis
-                    tickFormatter={formatCompact}
-                    stroke="#7f8cad"
-                    tickLine={false}
-                    axisLine={false}
-                    fontSize={12}
-                    width={54}
-                  />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    labelStyle={{ color: "#aab7d8" }}
-                    formatter={(value, name) => [formatNumber(value), name]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="input_tokens"
-                    name="Input"
-                    stroke="#7c9cff"
-                    strokeWidth={2}
-                    fill="url(#inputGradient)"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="output_tokens"
-                    name="Output"
-                    stroke="#4fd1b8"
-                    strokeWidth={2}
-                    fill="url(#outputGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
 
-          <div className="tables-grid">
-            <UsageTable title="Per model" subtitle="Distribusi pemakaian model publik" rows={data.by_model} />
-            <UsageTable title="Per provider" subtitle="Beban tiap provider terkonfigurasi" rows={data.by_provider} />
-            <UsageTable title="Per virtual key" subtitle="Pemakaian per klien" rows={data.by_key} />
-          </div>
+            {loading && !data ? (
+              <TableSkeleton rows={6} columns={7} />
+            ) : data?.logs?.length ? (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Waktu</th>
+                      <th scope="col">Model</th>
+                      <th scope="col">Provider</th>
+                      <th scope="col" className="num">Token in / out</th>
+                      <th scope="col" className="num">Latency</th>
+                      <th scope="col">Status</th>
+                      <th scope="col" className="num">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.logs.map((item) => (
+                      <tr
+                        key={item.id}
+                        className="clickable"
+                        onClick={() => setDetail(item)}
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") setDetail(item);
+                        }}
+                      >
+                        <td className="mono-sm">{formatTime(item.created_at)}</td>
+                        <td>
+                          <div className="cell-strong">{item.public_model}</div>
+                          <div className="cell-sub mono-sm">{item.provider_model}</div>
+                        </td>
+                        <td className="cell-sub">{item.provider_name ?? "—"}</td>
+                        <td className="num mono-sm">
+                          {formatCompact(item.input_tokens)} / {formatCompact(item.output_tokens)}
+                        </td>
+                        <td className="num mono-sm">{formatDuration(item.duration_ms)}</td>
+                        <td>
+                          <StatusBadge
+                            tone={item.status_code < 300 ? "ok" : "err"}
+                            label={String(item.status_code)}
+                            dot={false}
+                          />
+                        </td>
+                        <td className="num">
+                          {item.cost_status === "unknown" ? (
+                            <StatusBadge tone={COST_TONES.unknown} label="Unknown" dot={false} />
+                          ) : (
+                            <span className="mono-sm">
+                              {formatUsd(item.cost_usd)}
+                              <span className={`cost-tag ${item.cost_status}`}>
+                                {item.cost_status === "estimated" ? "est" : "resmi"}
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState
+                title="Belum ada request"
+                description="Request yang melewati gateway akan muncul di sini."
+              />
+            )}
+          </section>
         </>
       ) : null}
+
+      {detail ? <RequestDetailModal item={detail} onClose={() => setDetail(null)} /> : null}
     </div>
   );
 }

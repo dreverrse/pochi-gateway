@@ -1,6 +1,8 @@
 import hashlib
 import os
 import secrets
+import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -110,6 +112,70 @@ def compare_admin_tokens(candidate: str, expected: str) -> bool:
     if not candidate or not expected:
         return False
     return secrets.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+
+
+class LoginThrottle:
+    """Pembatas percobaan login per alamat klien (sliding window, in-memory).
+
+    Satu proses uvicorn, jadi state cukup di memori. Restart server
+    mengosongkan hitungan; itu disengaja agar tidak ada state yang bisa
+    dipakai untuk mengunci admin secara permanen.
+    """
+
+    def __init__(
+        self,
+        max_attempts: int = 10,
+        window_seconds: int = 60,
+        max_clients: int = 2048,
+    ) -> None:
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self.max_clients = max_clients
+        self._lock = threading.Lock()
+        self._attempts: dict[str, list[float]] = {}
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        stale = [client for client, stamps in self._attempts.items() if stamps[-1] <= cutoff]
+        for client in stale:
+            self._attempts.pop(client, None)
+        if len(self._attempts) <= self.max_clients:
+            return
+        ordered = sorted(self._attempts.items(), key=lambda item: item[1][-1])
+        for client, _ in ordered[: len(self._attempts) - self.max_clients]:
+            self._attempts.pop(client, None)
+
+    def retry_after(self, client: str) -> int:
+        """0 berarti boleh mencoba; selain itu detik sampai boleh coba lagi."""
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            stamps = self._attempts.get(client)
+            if not stamps:
+                return 0
+            cutoff = now - self.window_seconds
+            stamps = [stamp for stamp in stamps if stamp > cutoff]
+            if not stamps:
+                self._attempts.pop(client, None)
+                return 0
+            self._attempts[client] = stamps
+            if len(stamps) < self.max_attempts:
+                return 0
+            return max(1, int(stamps[0] + self.window_seconds - now) + 1)
+
+    def register_failure(self, client: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            self._attempts.setdefault(client, []).append(now)
+
+    def record(self, client: str) -> None:
+        """Catat satu pemakaian (dipakai juga untuk pembatas endpoint lain)."""
+        self.register_failure(client)
+
+    def reset(self, client: str) -> None:
+        with self._lock:
+            self._attempts.pop(client, None)
 
 
 def require_admin(

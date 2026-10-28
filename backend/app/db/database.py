@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,13 +30,34 @@ def get_connection(db_path: Path) -> Iterator[sqlite3.Connection]:
 def _migrate(connection: sqlite3.Connection) -> None:
     """Migrasi idempoten untuk DB lama. CREATE TABLE IF NOT EXISTS tidak
     mengubah tabel yang sudah ada, jadi kolom baru ditambah manual."""
-    columns = {
+    key_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(virtual_keys)")
     }
-    if "rate_limit_rpm" not in columns:
+    if "rate_limit_rpm" not in key_columns:
         connection.execute(
             "ALTER TABLE virtual_keys ADD COLUMN rate_limit_rpm INTEGER"
         )
+
+    model_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(models)")
+    }
+    if "supports_streaming" not in model_columns:
+        connection.execute(
+            "ALTER TABLE models ADD COLUMN supports_streaming INTEGER NOT NULL DEFAULT 0"
+        )
+    if "is_default" not in model_columns:
+        connection.execute(
+            "ALTER TABLE models ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _restrict_permissions(path: Path) -> None:
+    """Database berisi metadata biaya dan nama key; user lokal lain tidak perlu membacanya."""
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        try:
+            os.chmod(candidate, 0o600)
+        except OSError:
+            pass
 
 
 def init_db(settings: Settings) -> None:
@@ -50,3 +72,4 @@ def init_db(settings: Settings) -> None:
 
             seed_demo_data(connection)
             connection.commit()
+    _restrict_permissions(settings.db_path)

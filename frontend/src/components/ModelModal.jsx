@@ -11,6 +11,8 @@ export default function ModelModal({ model, providers, onClose, onSaved }) {
     provider_id: String(model?.provider_id ?? defaultProvider ?? ""),
     provider_model: model?.provider_model ?? "",
     enabled: model?.enabled ?? true,
+    supports_streaming: model?.supports_streaming ?? false,
+    is_default: model?.is_default ?? false,
     input_price:
       model?.input_usd_per_million === null || model?.input_usd_per_million === undefined
         ? ""
@@ -58,6 +60,8 @@ export default function ModelModal({ model, providers, onClose, onSaved }) {
       provider_id: Number(form.provider_id),
       provider_model: form.provider_model.trim(),
       enabled: form.enabled,
+      supports_streaming: form.supports_streaming,
+      is_default: form.is_default,
     };
 
     if (hasInputPrice) {
@@ -198,6 +202,30 @@ export default function ModelModal({ model, providers, onClose, onSaved }) {
             />
             <span>Aktifkan model di gateway</span>
           </label>
+
+          <div className="form-row">
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.supports_streaming}
+                onChange={(event) => update("supports_streaming", event.target.checked)}
+              />
+              <span>Mendukung streaming SSE</span>
+            </label>
+
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.is_default}
+                onChange={(event) => update("is_default", event.target.checked)}
+              />
+              <span>Jadikan model default</span>
+            </label>
+          </div>
+          <p className="field-note">
+            Penanda ini dokumentasi konfigurasi. Gateway tetap memakai nilai `model` dari
+            request klien; default tidak mengubah routing.
+          </p>
 
           <p className="form-hint">
             <Boxes size={13} aria-hidden="true" />

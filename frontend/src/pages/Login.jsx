@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Eye, EyeOff, ShieldCheck, Terminal, TriangleAlert } from "lucide-react";
 
 import { api } from "../api/client.js";
+import PochiLogo from "../components/PochiLogo.jsx";
 
 export default function Login({ onLogin }) {
   const [token, setToken] = useState("");
@@ -31,20 +32,20 @@ export default function Login({ onLogin }) {
 
   return (
     <div className="login-screen">
+      <div className="login-glow" aria-hidden="true" />
       <div className="login-card">
-        <div className="brand login-brand">
-          <div className="brand-mark" aria-hidden="true">P</div>
-          <div>
+        <div className="login-brand">
+          <PochiLogo size={34} className="brand-logo" />
+          <span className="brand-name">
             <strong>Pochi</strong>
-            <span>Gateway</span>
-          </div>
+            <small>Gateway</small>
+          </span>
         </div>
 
-        <p className="eyebrow">Admin access</p>
         <h1>Masuk ke dashboard</h1>
         <p className="login-copy">
-          Dashboard ini dilindungi admin token lokal. Token disimpan di perangkat dan hanya
-          dikirim ke server Pochi Gateway.
+          Dashboard lokal untuk mengelola provider, model, dan virtual key gateway. Akses
+          memakai admin token yang tersimpan di server.
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -78,7 +79,7 @@ export default function Login({ onLogin }) {
             </p>
           ) : null}
 
-          <button type="submit" className="button primary login-submit" disabled={submitting}>
+          <button type="submit" className="btn primary login-submit" disabled={submitting}>
             <ShieldCheck size={16} aria-hidden="true" />
             {submitting ? "Memeriksa token..." : "Masuk"}
           </button>
@@ -88,7 +89,7 @@ export default function Login({ onLogin }) {
           <Terminal size={16} aria-hidden="true" />
           <div>
             <span>Baca token dari file lokal:</span>
-            <code>cat ~/Projects/pochi-gateway/data/admin_token</code>
+            <code>cat ~/Proyek/Pochi/pochi-gateway/data/admin_token</code>
           </div>
         </div>
       </div>

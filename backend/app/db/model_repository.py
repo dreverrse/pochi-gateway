@@ -11,6 +11,8 @@ SELECT
     m.provider_id,
     m.provider_model,
     m.enabled,
+    m.supports_streaming,
+    m.is_default,
     m.created_at,
     m.updated_at,
     p.name AS provider_name
@@ -82,17 +84,31 @@ def create_model(
     enabled: bool,
     input_usd_per_million: float | None = None,
     output_usd_per_million: float | None = None,
+    supports_streaming: bool = False,
+    is_default: bool = False,
 ) -> sqlite3.Row:
     stamp = _timestamp()
     with get_connection(settings.db_path) as connection:
         try:
+            if is_default:
+                connection.execute("UPDATE models SET is_default = 0")
             cursor = connection.execute(
                 """
                 INSERT INTO models (
-                    public_name, provider_id, provider_model, enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    public_name, provider_id, provider_model, enabled,
+                    supports_streaming, is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (public_name, provider_id, provider_model, int(enabled), stamp, stamp),
+                (
+                    public_name,
+                    provider_id,
+                    provider_model,
+                    int(enabled),
+                    int(supports_streaming),
+                    int(is_default),
+                    stamp,
+                    stamp,
+                ),
             )
             if input_usd_per_million is not None and output_usd_per_million is not None:
                 _save_price(
@@ -127,6 +143,11 @@ def update_model(
             return None
 
         try:
+            if int(fields.get("is_default", 0) or 0):
+                connection.execute(
+                    "UPDATE models SET is_default = 0 WHERE id <> ?",
+                    (model_id,),
+                )
             if fields:
                 assignments = ", ".join(f"{field} = ?" for field in fields)
                 connection.execute(

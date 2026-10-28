@@ -1,9 +1,54 @@
+import ipaddress
+import socket
 from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.config import settings
+
 AdapterType = Literal["openai_compatible", "inception"]
+
+# Rentang yang tidak boleh dituju gateway saat URL provider dibatasi ke host publik.
+_FORBIDDEN_FLAGS = (
+    "is_private",
+    "is_loopback",
+    "is_link_local",
+    "is_reserved",
+    "is_multicast",
+    "is_unspecified",
+)
+
+
+def _is_forbidden_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any(getattr(address, flag) for flag in _FORBIDDEN_FLAGS)
+
+
+def _host_is_forbidden(hostname: str) -> bool:
+    """True bila host menunjuk ke jaringan privat/lokal. Hostname di-resolve;
+    kegagalan DNS dianggap tidak memblokir supaya penyimpanan tetap bisa
+    dilakukan tanpa jaringan. Resolusi ulang saat request tetap mungkin
+    berubah (DNS rebinding), jadi ini pengaman tambahan, bukan jaminan."""
+    try:
+        addresses = {ipaddress.ip_address(hostname)}
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(hostname, None)
+        except OSError:
+            return False
+        addresses = {ipaddress.ip_address(info[4][0]) for info in resolved}
+    return any(_is_forbidden_address(address) for address in addresses)
+
+
+def _reject_private_host(value: str) -> None:
+    if settings.allow_private_provider_urls:
+        return
+    hostname = urlparse(value).hostname or ""
+    if hostname and _host_is_forbidden(hostname):
+        raise ValueError(
+            "Base URL menunjuk ke jaringan privat. Set "
+            "POCHI_ALLOW_PRIVATE_PROVIDER_URLS=true bila memang disengaja."
+        )
 
 
 def _clean_name(value: str) -> str:
@@ -26,7 +71,9 @@ def _clean_base_url(value: str) -> str:
         raise ValueError("Base URL tidak boleh mengandung kredensial")
     if parsed.query or parsed.fragment:
         raise ValueError("Base URL tidak boleh mengandung query atau fragment")
-    return value.rstrip("/")
+    value = value.rstrip("/")
+    _reject_private_host(value)
+    return value
 
 
 def _clean_api_key(value: str | None) -> str | None:
@@ -103,3 +150,14 @@ class ProviderTestResult(BaseModel):
     status_code: int | None = None
     latency_ms: int | None = None
     models_count: int | None = None
+
+
+class ProviderTemplateOut(BaseModel):
+    id: str
+    name: str
+    base_url: str
+    adapter_type: AdapterType
+    category: str
+    free_note: str
+    docs_url: str
+    key_url: str
