@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Boxes,
   CheckCircle2,
+  History,
   Pencil,
   Plus,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
 
 import { api } from "../api/client.js";
 import ModelModal from "../components/ModelModal.jsx";
+import PriceHistoryModal from "../components/PriceHistoryModal.jsx";
 import { formatPrice } from "../utils/format.js";
 
 export default function Models() {
@@ -21,6 +23,7 @@ export default function Models() {
   const [notice, setNotice] = useState("");
   const [actionError, setActionError] = useState("");
   const [modal, setModal] = useState(null);
+  const [historyModal, setHistoryModal] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -241,6 +244,15 @@ export default function Models() {
                           <button
                             type="button"
                             className="button small"
+                            onClick={() => setHistoryModal(model)}
+                            title="Lihat riwayat perubahan harga"
+                          >
+                            <History size={14} aria-hidden="true" />
+                            Riwayat
+                          </button>
+                          <button
+                            type="button"
+                            className="button small"
                             onClick={() => setModal({ model })}
                           >
                             <Pencil size={14} aria-hidden="true" />
@@ -264,6 +276,10 @@ export default function Models() {
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />
+      ) : null}
+
+      {historyModal ? (
+        <PriceHistoryModal model={historyModal} onClose={() => setHistoryModal(null)} />
       ) : null}
     </div>
   );

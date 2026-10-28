@@ -28,6 +28,7 @@ data/admin_token
 data/secret.key
 data/*.key
 data/backups/
+data/*virtual_key*
 
 # Editor dan OS
 .vscode/

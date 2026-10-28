@@ -78,3 +78,22 @@ def list_request_logs(
         ).fetchall()
 
     return rows, int(total)
+
+
+def list_request_logs_all(
+    days: int,
+    status: str,
+    model: str | None,
+    key_id: int | None,
+) -> list[sqlite3.Row]:
+    where_sql, values = _filters(days, status, model, key_id)
+    with get_connection(settings.db_path) as connection:
+        rows = connection.execute(
+            f"""
+            {LOG_SELECT}
+            WHERE {where_sql}
+            ORDER BY l.created_at DESC, l.id DESC
+            """,
+            values,
+        ).fetchall()
+    return rows

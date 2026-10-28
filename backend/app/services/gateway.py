@@ -46,6 +46,7 @@ class AuthenticatedKey:
     allowed_models: tuple[str, ...]
     budget_limit_usd: float | None
     budget_period: str
+    rate_limit_rpm: int | None = None
 
 
 @dataclass
@@ -95,6 +96,7 @@ def authenticate(token: str) -> AuthenticatedKey:
         allowed_models=_parse_allowed_models(row["allowed_models"]),
         budget_limit_usd=row["budget_limit_usd"],
         budget_period=row["budget_period"],
+        rate_limit_rpm=row["rate_limit_rpm"],
     )
 
 
@@ -107,8 +109,12 @@ def _created_epoch(value: str) -> int:
 
 
 def enforce_limits(virtual_key: AuthenticatedKey) -> None:
-    limit = settings.gateway_rate_limit_rpm
-    if limit > 0:
+    limit = (
+        virtual_key.rate_limit_rpm
+        if virtual_key.rate_limit_rpm is not None
+        else settings.gateway_rate_limit_rpm
+    )
+    if limit is not None and limit > 0:
         now = time.time()
         window_start = int(now // 60) * 60
         count = gateway_repository.consume_rate_limit(virtual_key.id, window_start)
@@ -384,6 +390,12 @@ async def proxy_chat(
     adapter = get_adapter(route.adapter_type)
     body = payload.model_dump(exclude_unset=True, exclude_none=True)
     body["model"] = route.provider_model
+    if payload.stream and getattr(
+        adapter, "supports_stream_options_include_usage", False
+    ):
+        stream_options = dict(body.get("stream_options") or {})
+        stream_options.setdefault("include_usage", True)
+        body["stream_options"] = stream_options
     body = adapter.prepare_body(body)
 
     url = adapter.chat_completions_url(route.base_url)

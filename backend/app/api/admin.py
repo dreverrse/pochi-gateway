@@ -2,11 +2,12 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from app.core.security import compare_admin_tokens, require_admin
 from app.db.repositories import get_summary, get_timeseries
 from app.models.admin import LoginRequest, LoginResponse
-from app.models.catalog import ModelCreate, ModelOut, ModelUpdate
+from app.models.catalog import ModelCreate, ModelOut, ModelUpdate, PriceHistoryOut
 from app.models.entities import Summary, TimeseriesPoint
 from app.models.providers import ProviderCreate, ProviderOut, ProviderTestResult, ProviderUpdate
 from app.models.usage import UsageLogsPage
@@ -65,6 +66,35 @@ def summary(days: int = Query(14, ge=1, le=90)) -> Summary:
 @router.get("/usage/timeseries", response_model=list[TimeseriesPoint])
 def usage_timeseries(days: int = Query(14, ge=1, le=90)) -> list[TimeseriesPoint]:
     return get_timeseries(days=days)
+
+
+@router.get("/prices/history", response_model=list[PriceHistoryOut])
+def price_history(
+    provider_model: str = Query(..., max_length=200),
+) -> list[PriceHistoryOut]:
+    return model_service.price_history(provider_model)
+
+
+@router.get("/usage/export")
+def export_usage(
+    format: Literal["csv", "json"] = Query("csv"),
+    days: int = Query(14, ge=1, le=90),
+    status: Literal["all", "success", "error"] = Query("all"),
+    model: str | None = Query(None, max_length=100),
+    key_id: int | None = Query(None, gt=0),
+) -> Response:
+    filename, media_type, content = usage_service.export_logs(
+        format=format,
+        days=days,
+        status=status,
+        model=model,
+        key_id=key_id,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/usage/logs", response_model=UsageLogsPage)

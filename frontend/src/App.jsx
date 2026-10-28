@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Boxes,
   KeyRound,
@@ -13,12 +13,13 @@ import {
 
 import { api } from "./api/client.js";
 import { clearAdminToken, getAdminToken, setAdminToken } from "./auth.js";
-import APIKeys from "./pages/APIKeys.jsx";
 import Login from "./pages/Login.jsx";
-import Models from "./pages/Models.jsx";
-import Overview from "./pages/Overview.jsx";
-import Providers from "./pages/Providers.jsx";
-import UsageLogs from "./pages/UsageLogs.jsx";
+
+const APIKeys = lazy(() => import("./pages/APIKeys.jsx"));
+const Models = lazy(() => import("./pages/Models.jsx"));
+const Overview = lazy(() => import("./pages/Overview.jsx"));
+const Providers = lazy(() => import("./pages/Providers.jsx"));
+const UsageLogs = lazy(() => import("./pages/UsageLogs.jsx"));
 
 const PAGES = [
   { id: "overview", label: "Overview", icon: LayoutDashboard, Component: Overview },
@@ -166,7 +167,16 @@ export default function App() {
         </header>
 
         <div className="content">
-          <CurrentPage />
+          <Suspense
+            fallback={
+              <div className="loading-panel">
+                <span className="spinner" aria-hidden="true" />
+                <p>Memuat halaman...</p>
+              </div>
+            }
+          >
+            <CurrentPage />
+          </Suspense>
         </div>
       </main>
     </div>

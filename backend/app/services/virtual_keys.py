@@ -3,7 +3,7 @@ import secrets
 import sqlite3
 
 from app.core.security import hash_api_key
-from app.db import model_repository, virtual_key_repository
+from app.db import gateway_repository, model_repository, virtual_key_repository
 from app.models.virtual_keys import (
     VirtualKeyCreate,
     VirtualKeyCreated,
@@ -39,6 +39,10 @@ def _to_out(row: sqlite3.Row) -> VirtualKeyOut:
         allowed_models=[str(model) for model in allowed_models],
         budget_limit_usd=row["budget_limit_usd"],
         budget_period=row["budget_period"],
+        rate_limit_rpm=row["rate_limit_rpm"],
+        budget_spent_usd=gateway_repository.budget_spend(
+            row["id"], row["budget_period"]
+        ),
         enabled=bool(row["enabled"]),
         created_at=row["created_at"],
         last_used_at=row["last_used_at"],
@@ -76,6 +80,7 @@ def create_key(payload: VirtualKeyCreate) -> VirtualKeyCreated:
         budget_limit_usd=payload.budget_limit_usd,
         budget_period=payload.budget_period,
         enabled=payload.enabled,
+        rate_limit_rpm=payload.rate_limit_rpm,
     )
     return VirtualKeyCreated(key=_to_out(row), token=token)
 
@@ -101,6 +106,9 @@ def update_key(key_id: int, payload: VirtualKeyUpdate) -> VirtualKeyOut:
 
     if "budget_period" in payload.model_fields_set and payload.budget_period is not None:
         fields["budget_period"] = payload.budget_period
+
+    if "rate_limit_rpm" in payload.model_fields_set:
+        fields["rate_limit_rpm"] = payload.rate_limit_rpm
 
     if "enabled" in payload.model_fields_set and payload.enabled is not None:
         fields["enabled"] = int(payload.enabled)

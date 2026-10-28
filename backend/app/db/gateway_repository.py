@@ -48,7 +48,8 @@ def find_virtual_key_by_hash(key_hash: str) -> sqlite3.Row | None:
                 enabled,
                 revoked_at,
                 budget_limit_usd,
-                budget_period
+                budget_period,
+                rate_limit_rpm
             FROM virtual_keys
             WHERE key_hash = ?
             """,

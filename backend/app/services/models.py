@@ -1,7 +1,7 @@
 import sqlite3
 
 from app.db import model_repository, pricing_repository, provider_repository
-from app.models.catalog import ModelCreate, ModelOut, ModelUpdate
+from app.models.catalog import ModelCreate, ModelOut, ModelUpdate, PriceHistoryOut
 
 
 class ModelNotFoundError(Exception):
@@ -104,3 +104,10 @@ def update_model(model_id: int, payload: ModelUpdate) -> ModelOut:
         raise ModelNotFoundError(f"Model {model_id} tidak ditemukan")
     price = pricing_repository.get_effective_price(row["provider_model"])
     return _to_out(row, price)
+
+
+def price_history(provider_model: str) -> list[PriceHistoryOut]:
+    return [
+        PriceHistoryOut(**dict(row))
+        for row in pricing_repository.get_price_history(provider_model)
+    ]

@@ -18,6 +18,10 @@ export default function VirtualKeyModal({ virtualKey, models, onClose, onSaved }
         ? ""
         : String(virtualKey.budget_limit_usd),
     budget_period: virtualKey?.budget_period ?? "monthly",
+    rate_limit_rpm:
+      virtualKey?.rate_limit_rpm === null || virtualKey?.rate_limit_rpm === undefined
+        ? ""
+        : String(virtualKey.rate_limit_rpm),
     enabled: virtualKey?.enabled ?? true,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -65,11 +69,20 @@ export default function VirtualKeyModal({ virtualKey, models, onClose, onSaved }
       return;
     }
 
+    const rpmText = form.rate_limit_rpm.trim();
+    const rpm = rpmText === "" ? null : Number(rpmText);
+    if (rpm !== null && (!Number.isInteger(rpm) || rpm < 0)) {
+      setError("Rate limit harus berupa bilangan bulat 0 atau lebih.");
+      setSubmitting(false);
+      return;
+    }
+
     const payload = {
       name: form.name.trim(),
       allowed_models: form.allowed_models,
       budget_limit_usd: budget,
       budget_period: form.budget_period,
+      rate_limit_rpm: rpm,
       enabled: form.enabled,
     };
 
@@ -199,6 +212,23 @@ export default function VirtualKeyModal({ virtualKey, models, onClose, onSaved }
               </select>
             </label>
           </div>
+
+          <label className="field">
+            <span>Rate limit (request/menit)</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={form.rate_limit_rpm}
+              onChange={(event) => update("rate_limit_rpm", event.target.value)}
+              placeholder="Ikuti setelan global"
+              min="0"
+              max="1000000"
+              step="1"
+            />
+            <small className="field-note">
+              Biarkan kosong untuk memakai batas default gateway.
+            </small>
+          </label>
 
           <label className="field checkbox-field">
             <input

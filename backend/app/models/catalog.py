@@ -89,3 +89,14 @@ class ModelOut(BaseModel):
     price_updated_at: str | None = None
     created_at: str
     updated_at: str
+
+
+class PriceHistoryOut(BaseModel):
+    id: int
+    provider_model: str
+    input_usd_per_million: float
+    output_usd_per_million: float
+    effective_from: str
+    effective_until: str | None
+    source: str
+    updated_at: str

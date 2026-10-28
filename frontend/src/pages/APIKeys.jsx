@@ -193,6 +193,7 @@ export default function APIKeys() {
                   <th scope="col">Prefix</th>
                   <th scope="col">Model</th>
                   <th scope="col">Anggaran</th>
+                  <th scope="col">Rate limit</th>
                   <th scope="col">Status</th>
                   <th scope="col">Terakhir dipakai</th>
                   <th scope="col" className="numeric">Aksi</th>
@@ -245,6 +246,18 @@ export default function APIKeys() {
                             <span>/ {PERIOD_LABELS[key.budget_period] ?? key.budget_period}</span>
                           ) : null}
                         </div>
+                        {key.budget_spent_usd > 0 ? (
+                          <div className="budget-spent" title="Terpakai periode ini">
+                            Terpakai {formatBudget(key.budget_spent_usd)}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {key.rate_limit_rpm === null || key.rate_limit_rpm === undefined ? (
+                          <span className="muted-text">Default</span>
+                        ) : (
+                          <span className="chip muted">{key.rate_limit_rpm} / mnt</span>
+                        )}
                       </td>
                       <td>
                         {revoked ? (

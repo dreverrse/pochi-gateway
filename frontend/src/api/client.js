@@ -75,4 +75,21 @@ export const api = {
     request(`/api/v1/admin/keys/${keyId}`, { method: "PATCH", body: payload }),
   revokeKey: (keyId) =>
     request(`/api/v1/admin/keys/${keyId}/revoke`, { method: "POST" }),
+  priceHistory: (providerModel) =>
+    request(
+      `/api/v1/admin/prices/history?provider_model=${encodeURIComponent(providerModel)}`,
+    ),
+  exportUsage: ({ format = "csv", days = 14, status = "all", model = "", keyId = "" } = {}) => {
+    const params = new URLSearchParams({
+      format,
+      days: String(days),
+      status,
+    });
+    if (model) params.set("model", model);
+    if (keyId) params.set("key_id", String(keyId));
+    const token = getAdminToken();
+    const headers = { Accept: "application/octet-stream" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(`${API_BASE}/api/v1/admin/usage/export?${params}`, { headers });
+  },
 };

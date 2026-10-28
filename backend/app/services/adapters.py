@@ -6,6 +6,10 @@ from app.core.config import settings
 class ProviderAdapter:
     name = "openai_compatible"
 
+    # Sebagian besar provider OpenAI-compatible menerima stream_options.include_usage
+    # agar token usage ikut dikirim pada streaming (biaya jadi 'known').
+    supports_stream_options_include_usage = True
+
     def chat_completions_url(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/chat/completions"
 

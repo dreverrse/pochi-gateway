@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  Download,
   Filter,
   RefreshCw,
   ScrollText,
@@ -112,6 +113,40 @@ export default function UsageLogs() {
     setPage(1);
   }
 
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
+  async function handleExport(format) {
+    setExporting(true);
+    setExportError("");
+    try {
+      const response = await api.exportUsage({
+        format,
+        days: filters.days,
+        status: filters.status,
+        model: filters.model,
+        keyId: filters.keyId,
+      });
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const fallback = `usage-export.${format}`;
+      const filename = match ? match[1] : fallback;
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.total_pages ?? 1;
@@ -191,6 +226,29 @@ export default function UsageLogs() {
         </div>
 
         <div className="usage-filter-actions">
+          {exportError ? (
+            <span className="form-error" role="alert">{exportError}</span>
+          ) : null}
+          <button
+            type="button"
+            className="button small"
+            onClick={() => handleExport("csv")}
+            disabled={exporting}
+            title="Unduh CSV filter ini"
+          >
+            <Download size={14} aria-hidden="true" />
+            {exporting ? "Mengunduh..." : "CSV"}
+          </button>
+          <button
+            type="button"
+            className="button small"
+            onClick={() => handleExport("json")}
+            disabled={exporting}
+            title="Unduh JSON filter ini"
+          >
+            <Download size={14} aria-hidden="true" />
+            JSON
+          </button>
           <button type="button" className="button small" onClick={resetFilters}>
             <Filter size={14} aria-hidden="true" />
             Reset

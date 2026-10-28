@@ -32,6 +32,7 @@ class VirtualKeyCreate(BaseModel):
     allowed_models: list[str] = Field(default_factory=list)
     budget_limit_usd: float | None = Field(default=None, ge=0, le=1_000_000)
     budget_period: BudgetPeriod = "monthly"
+    rate_limit_rpm: int | None = Field(default=None, ge=0, le=1_000_000)
     enabled: bool = True
 
     @field_validator("name")
@@ -50,6 +51,7 @@ class VirtualKeyUpdate(BaseModel):
     allowed_models: list[str] | None = None
     budget_limit_usd: float | None = Field(default=None, ge=0, le=1_000_000)
     budget_period: BudgetPeriod | None = None
+    rate_limit_rpm: int | None = Field(default=None, ge=0, le=1_000_000)
     enabled: bool | None = None
 
     @field_validator("name")
@@ -74,6 +76,8 @@ class VirtualKeyOut(BaseModel):
     allowed_models: list[str]
     budget_limit_usd: float | None
     budget_period: BudgetPeriod
+    rate_limit_rpm: int | None
+    budget_spent_usd: float | None = None
     enabled: bool
     created_at: str
     last_used_at: str | None

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.db.database import get_connection
 
-KEY_SELECT = """
+KEY_SELECT = """ 
 SELECT
     id,
     name,
@@ -12,6 +12,7 @@ SELECT
     allowed_models,
     budget_limit_usd,
     budget_period,
+    rate_limit_rpm,
     enabled,
     created_at,
     last_used_at,
@@ -48,6 +49,7 @@ def create_key(
     budget_limit_usd: float | None,
     budget_period: str,
     enabled: bool,
+    rate_limit_rpm: int | None = None,
 ) -> sqlite3.Row:
     stamp = _timestamp()
     with get_connection(settings.db_path) as connection:
@@ -56,8 +58,9 @@ def create_key(
                 """
                 INSERT INTO virtual_keys (
                     name, key_prefix, key_hash, allowed_models,
-                    budget_limit_usd, budget_period, enabled, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    budget_limit_usd, budget_period, rate_limit_rpm,
+                    enabled, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name,
@@ -66,6 +69,7 @@ def create_key(
                     allowed_models,
                     budget_limit_usd,
                     budget_period,
+                    rate_limit_rpm,
                     int(enabled),
                     stamp,
                 ),

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS virtual_keys (
     allowed_models TEXT NOT NULL DEFAULT '[]',
     budget_limit_usd REAL,
     budget_period TEXT NOT NULL DEFAULT 'monthly',
+    rate_limit_rpm INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     created_at TEXT NOT NULL,
     last_used_at TEXT,

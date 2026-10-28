@@ -70,3 +70,19 @@ def get_effective_prices(
             (*provider_models, stamp, stamp),
         ).fetchall()
     return {row["provider_model"]: row for row in rows}
+
+
+def get_price_history(provider_model: str) -> list[sqlite3.Row]:
+    """Riwayat perubahan harga untuk satu provider_model (terbaru dulu)."""
+    with get_connection(settings.db_path) as connection:
+        return connection.execute(
+            f"""
+            SELECT
+                id,
+                {PRICE_COLUMNS}
+            FROM model_prices
+            WHERE provider_model = ?
+            ORDER BY effective_from DESC, id DESC
+            """,
+            (provider_model,),
+        ).fetchall()
