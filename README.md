@@ -413,6 +413,49 @@ cd frontend
 npm run build
 ```
 
+## Tanpa domain: Tailscale
+
+Kalau belum punya domain, Cloudflare Access tidak bisa dipakai (butuh zone). Tailscale memberi URL HTTPS gratis tanpa domain, tanpa membuka port apa pun ke internet.
+
+```bash
+cd pochi-gateway
+./scripts/setup-tailscale.sh
+```
+
+Enam stage: pasang `tailscaled`, login akun, pilih mode, aktifkan HTTPS tailnet, verifikasi `/health` menjawab `200`.
+
+| Mode | URL | Siapa yang bisa masuk |
+|---|---|---|
+| **Serve** (default) | `https://<host>.<tailnet>.ts.net` | Hanya perangkat yang login ke tailnet-mu |
+| **Funnel** | sama, tapi terbuka ke internet | Siapa pun yang punya URL, sampai halaman login Pochi |
+
+Serve cocok untuk "publik artinya bisa kubuka dari mana saja" — dari HP, laptop, warnet. Funnel cocok kalau kamu benar-benar butuh URL yang bisa dibuka orang lain, tapi ingat: satu-satunya kunci di sana adalah admin token.
+
+Tailscale personal gratis (3 user, 100 device). Cabut kapan saja: `sudo tailscale serve reset` atau `sudo tailscale funnel reset`.
+
+Kalau nanti ingin URL publik **dengan** gerbang identitas seperti Cloudflare Access, daftarkan domain gratis yang mengizinkan NS kustom (mis. `eu.org`, perlu persetujuan) lalu jalankan wizard Cloudflare di bagian berikut tanpa perubahan.
+
+## Publik tapi hanya kamu (Cloudflare Tunnel + Access)
+
+Jalur paling singkat kalau aplikasi tetap ingin jalan di mesin sendiri (9Router di `127.0.0.1` tetap terjangkau) tapi bisa dibuka dari mana saja. Backend tidak pernah mendengar di IP publik: Cloudflare yang masuk, `cloudflared` yang keluar.
+
+```bash
+cd pochi-gateway
+cd frontend && npm run build && cd ..
+./scripts/setup-cloudflare-tunnel.sh
+```
+
+Wizard itu, tujuh stage, memandu: login Cloudflare, pilih hostname, buat tunnel, arahkan DNS, buat aplikasi Access berisi emailmu, lalu memasang `cloudflared` sebagai user service. Verifikasinya sederhana: `https://<hostname>/health` harus menjawab `302` ke login Access — kalau `200`, gate-nya belum aktif.
+
+Yang perlu disiapkan: domain yang nameserver-nya sudah pindah ke Cloudflare, dan akun Cloudflare Zero Trust (gratis sampai 50 user).
+
+Sisi aplikasi sudah disiapkan untuk ini:
+
+- `backend/app/main.py` melayani `frontend/dist` di origin yang sama, jadi satu port cukup di belakang tunnel. CSP dipisah: `default-src 'none'` untuk API, `default-src 'self'` untuk shell UI.
+- Tanpa `frontend/dist`, mount dilewati dan Vite di `:5173` tetap dipakai untuk dev.
+- `.env` produksi: `POCHI_SEED_DEMO=false`; `POCHI_ALLOW_PRIVATE_PROVIDER_URLS=true` khusus karena provider-nya loopback. Jangan dibalik kalau gateway dipakai sebagai relay ke internet.
+- Tetap satu worker uvicorn: tombol Stop chat memakai state in-process.
+
 ## Deployment non-lokal (HTTPS + reverse proxy)
 
 Backend tetap mendengarkan `127.0.0.1:8000`. Satu-satunya port yang dibuka ke jaringan adalah port reverse proxy (443). Jangan pernah membuka `8000` atau `5173` langsung ke internet: token dan body chat akan lewat tanpa TLS.

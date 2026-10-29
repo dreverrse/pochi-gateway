@@ -32,6 +32,9 @@ const COMPONENTS = {
 
 const COLLAPSE_KEY = "pochi_sidebar_collapsed";
 
+/** true = sembunyikan topbar di Chat Pochi. Dimatikan: hasilnya terasa jelek. */
+const CHAT_HIDE_TOPBAR = false;
+
 function readCollapsed() {
   try {
     return localStorage.getItem(COLLAPSE_KEY) === "1";
@@ -196,8 +199,10 @@ function Shell() {
         />
       ) : null}
 
-      <div className="app-main">
+      <div className={`app-main ${CHAT_HIDE_TOPBAR && pageId === "chat" ? "no-topbar" : ""}`}>
         <Topbar
+          pageId={pageId}
+          minimal={CHAT_HIDE_TOPBAR && pageId === "chat"}
           title={current.label}
           apiStatus={apiStatus}
           onOpenSidebar={() => setMobileOpen(true)}

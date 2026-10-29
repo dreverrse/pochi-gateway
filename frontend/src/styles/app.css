@@ -378,6 +378,11 @@ code {
   backdrop-filter: blur(14px);
 }
 
+/* Bar minimal: kosong di desktop, hanya tombol menu di layar kecil. */
+.topbar-minimal {
+  display: none;
+}
+
 .topbar-title {
   display: flex;
   flex-direction: column;
@@ -510,6 +515,33 @@ code {
 .content {
   padding: 24px 26px 48px;
   min-width: 0;
+}
+
+/* Tanpa topbar, tinggi workspace ditentukan flex, bukan angka calc: bar atas
+   bisa berubah tinggi (atau hilang) tanpa membuat halaman melar beberapa px. */
+.app-main.no-topbar {
+  height: 100dvh;
+  /* Grid item default `min-height:auto` ikut melar mengikuti isi; tanpa ini
+     halaman bisa lebih tinggi beberapa px dari layar karena workspace chat. */
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-main.no-topbar .content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-main.no-topbar .page-chat {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  /* .page memberi `margin: 0 auto`; di dalam flex column itu mematikan stretch
+     sehingga workspace menyempit. width:100% mengembalikan lebar penuh. */
+  width: 100%;
 }
 
 .page {
@@ -3469,6 +3501,14 @@ code {
 @media (max-width: 760px) {
   .content {
     padding: 18px 14px 40px;
+  }
+
+  .topbar-minimal {
+    display: flex;
+    align-items: center;
+    min-height: 46px;
+    padding: 6px 14px;
+    position: static;
   }
 
   .topbar {

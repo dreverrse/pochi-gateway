@@ -9,7 +9,7 @@ import PageHeader from "../components/PageHeader.jsx";
 import ProviderCard from "../components/ProviderCard.jsx";
 import ProviderModal from "../components/ProviderModal.jsx";
 import { CardSkeletons } from "../components/Skeleton.jsx";
-import { rangeParams } from "../utils/range.js";
+import { rangeLabel, rangeParams } from "../utils/range.js";
 
 export default function Providers({ openAddSignal = 0 }) {
   const { range, pushToast } = useUi();
@@ -119,7 +119,7 @@ export default function Providers({ openAddSignal = 0 }) {
         description="Endpoint upstream dan API key provider. Key dienkripsi di server dan tidak pernah dikirim kembali ke browser."
         meta={
           providers.length
-            ? `${providers.length} provider · ${enabledCount} aktif · ${providers.filter((p) => p.has_secret).length} key tersimpan`
+            ? `${providers.length} provider · ${enabledCount} aktif · ${providers.filter((p) => p.has_secret).length} key tersimpan · statistik ${rangeLabel(range)}`
             : null
         }
         actions={

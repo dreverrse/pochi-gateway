@@ -57,7 +57,11 @@ export default function Login({ onLogin }) {
                 value={token}
                 onChange={(event) => setToken(event.target.value)}
                 placeholder="Tempel admin token"
-                autoComplete="current-password"
+                name="pochi-admin-token"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 autoFocus
                 required
               />

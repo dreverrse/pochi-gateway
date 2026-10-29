@@ -17,17 +17,25 @@ import {
 
 import PochiLogo from "./PochiLogo.jsx";
 
+/**
+ * `ranges: true` menandai halaman yang datanya benar-benar ikut rentang waktu.
+ * Topbar memakai ini supaya 24H/7D/30D hanya muncul di tempat ia berpengaruh:
+ * halaman lain (Chat, Models, API Keys, Settings, Workflows) tidak punya data
+ * per-periode, jadi kontrolnya hanya jadi tombol mati di sana.
+ */
 export const PAGES = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "overview", label: "Overview", icon: LayoutDashboard, ranges: true },
   { id: "chat", label: "Chat Pochi", icon: MessageSquare },
   { id: "workflows", label: "Workflows", icon: Workflow },
-  { id: "providers", label: "Providers", icon: Server },
+  { id: "providers", label: "Providers", icon: Server, ranges: true },
   { id: "models", label: "Models", icon: Boxes },
   { id: "keys", label: "API Keys", icon: KeyRound },
-  { id: "analytics", label: "Analytics", icon: LineChart },
-  { id: "logs", label: "Request Logs", icon: ScrollText },
+  { id: "analytics", label: "Analytics", icon: LineChart, ranges: true },
+  { id: "logs", label: "Request Logs", icon: ScrollText, ranges: true },
   { id: "settings", label: "Settings", icon: Settings },
 ];
+
+export const RANGE_PAGES = new Set(PAGES.filter((page) => page.ranges).map((page) => page.id));
 
 export default function Sidebar({
   pageId,
